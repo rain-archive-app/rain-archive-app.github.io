@@ -1,5 +1,5 @@
 // Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=38';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=43';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';

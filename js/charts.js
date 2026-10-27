@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=38';
-import { fmtWall, STEP_MS } from './data.js?v=38';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=43';
+import { fmtWall, STEP_MS } from './data.js?v=43';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -211,11 +211,13 @@ function attachTouch(chart, el) {
 
 // ---------- Titles, tooltip ----------
 
-// Title line: "● Rain (total 14.2 mm)" with an optional detail line. t = {agg, value, extra}.
+// Title: "● Rain", then one grey line for the displayed window:
+// "total 21.1 mm · max 2.4 mm/h · 37 wet h" (value and unit in bold). t = {agg, value, extra}.
 function titleEl(key, color) {
   const el = document.createElement('div');
   el.className = 'chart-title';
-  el.innerHTML = '<span class="dot"></span><span class="name"></span> <span class="agg">(<span class="k"></span> <b></b><span class="when"></span>)</span><span class="extra"></span>';
+  el.innerHTML = '<span class="dot"></span><span class="name"></span>'
+    + '<span class="sub"><span class="k"></span> <b></b><span class="extra"></span></span>';
   el.querySelector('.dot').style.background = color;
   el.querySelector('.name').textContent = VAR_BY_KEY[key].label;
   return el;
@@ -223,10 +225,7 @@ function titleEl(key, color) {
 function fillTitle(el, t) {
   el.querySelector('.k').textContent = t?.agg || '';
   el.querySelector('b').textContent = t?.value || '–';
-  el.querySelector('.when').textContent = t?.when ? ` ${t.when}` : ''; // "from 19 Oct 14:00 to 22 Oct 2026 14:00"
-  const ex = el.querySelector('.extra');
-  ex.textContent = t?.extra || '';
-  ex.hidden = !t?.extra;
+  el.querySelector('.extra').textContent = t?.extra ? ` · ${t.extra}` : '';
 }
 
 export function disposeCharts() {
@@ -287,7 +286,8 @@ function describe(key, s, i, gran) {
 // ---------- Series and axes ----------
 
 // Series for one variable. axes = {main, cum} y-axis indices.
-function seriesFor(key, s, x, gran, color, axes, theme) {
+// endIdx: last bar on screen; the running total shows its value there, in bold.
+function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1) {
   const v = VAR_BY_KEY[key];
   const pts = (arr) => x.map((t, i) => [t, arr[i]]);
   const out = [];
@@ -297,8 +297,17 @@ function seriesFor(key, s, x, gran, color, axes, theme) {
   if (v.kind === 'sum') {
     out.push({ name: v.label, type: 'bar', yAxisIndex: axes.main, data: pts(s.val), itemStyle: { color }, barMaxWidth: 40, barCategoryGap: '15%',
       large: many, largeThreshold: 2000 });
+    const endVal = endIdx >= 0 ? s.cum[endIdx] : null;
     out.push({ name: `${v.label} – running total`, type: 'line', yAxisIndex: axes.cum, data: pts(s.cum), showSymbol: false, ...fast,
-      lineStyle: { color: theme.text, width: 1.5, type: 'dashed', opacity: 0.8 }, itemStyle: { color: theme.text }, z: 3 });
+      lineStyle: { color: theme.text, width: 1.5, type: 'dashed', opacity: 0.8 }, itemStyle: { color: theme.text }, z: 3,
+      markPoint: endVal == null ? { data: [] } : {
+        symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: theme.text },
+        // Just the number, in bold, right above the end of the line (no word, no unit, no background).
+        // Right-aligned on the point, so it never runs into the axis numbers on the right.
+        label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: 11,
+          formatter: () => endVal.toFixed(decimals(s.unit)) },
+        data: [{ coord: [x[endIdx], endVal] }],
+      } });
   } else if (v.kind === 'dir' || v.kind === 'code') {
     out.push({ name: v.label, type: 'scatter', yAxisIndex: axes.main, data: pts(s.val), symbolSize: many ? 3 : 6, itemStyle: { color },
       large: many, largeThreshold: 2000 });
@@ -433,6 +442,10 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   Object.assign(chartRange, range, { minSpan: 3 * 3600e3 });
   const zoom = opts.zoom;
   const span = zoom ? zoom.endMs - zoom.startMs : range.max - range.min;
+  // Last bar that starts before the right edge of the view (where the "total" label goes).
+  const viewEnd = zoom ? zoom.endMs : range.max;
+  let endIdx = -1;
+  for (let i = agg.start.length - 1; i >= 0; i--) if (agg.start[i] < viewEnd) { endIdx = i; break; }
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - (mode === 'combined' ? 140 : 112)); // first guess
   tickUnit = unitFor(span);
   topShown = topFor(span);
@@ -475,7 +488,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
       const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
-      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme));
+      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
       if (sc && v.kind !== 'dir') {
@@ -499,7 +512,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, 36));
       const opt = baseOption(gran, theme, makeTooltip([k]), 56, 56, zoom);
       opt.yAxis = yAxes;
-      opt.series = seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme);
+      opt.series = seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx);
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });
   }

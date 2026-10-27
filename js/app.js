@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=38';
+} from './vars.js?v=43';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=38';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=38';
-import { createRangeBar } from './rangebar.js?v=38';
+} from './data.js?v=43';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=43';
+import { createRangeBar } from './rangebar.js?v=43';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1313,20 +1313,40 @@ function clearResults() {
 
 function fmt(v, unit) { return v == null ? '–' : v.toFixed(decimals(unit)); }
 
-// Whole-period value per variable, shown in each chart title: {agg: 'total'|'mean'|…, value, extra}.
-// Cached: it only changes with the period, the variables or the units, not when the view moves.
-let titlesCache = { period: null, key: '', titles: null };
+// Value per variable for the displayed window, shown under each chart title:
+// {agg: 'total'|'mean'|…, value, extra}. It follows the view (recomputed when
+// the view settles), not the saved period. Cached for an unchanged window, data and units.
+let titlesCache = { raw: null, key: '', titles: null };
 function buildTitles(keys) {
-  const key = `${keys.join(',')}|${JSON.stringify(state.units)}`;
-  if (titlesCache.period === period && titlesCache.key === key) return titlesCache.titles;
-  const titles = computeTitles(keys);
-  titlesCache = { period, key, titles };
+  const s0 = zoomWin ? zoomWin.startMs : -Infinity, e0 = zoomWin ? zoomWin.endMs : Infinity;
+  const key = `${keys.join(',')}|${JSON.stringify(state.units)}|${s0}|${e0}`;
+  if (titlesCache.raw === raw && titlesCache.key === key) return titlesCache.titles;
+  // Hours inside the window: an hour stamped hh:00 covers (hh−1, hh].
+  const idx = [];
+  raw.times.forEach((t, i) => { const w = wallMs(t, raw.tz); if (w - 3600e3 >= s0 - 1 && w <= e0 + 1) idx.push(i); });
+  const win = { ...raw, times: idx.map((i) => raw.times[i]), values: Object.fromEntries(keys.map((k) => [k, idx.map((i) => raw.values[k][i])])) };
+  const when = idx.length ? windowWhen(wallMs(win.times[0], raw.tz) - 3600e3, wallMs(win.times[idx.length - 1], raw.tz)) : '';
+  const titles = computeTitles(keys, win, when);
+  titlesCache = { raw, key, titles };
   return titles;
 }
-function computeTitles(keys) {
-  const tot = aggregate(period, keys, 'total', state.units);
-  const hrs = aggregate(period, keys, 'hour', state.units);
-  const total = period.times.length;
+// "from 24.10.2026 17:00 to 27.10.2026 17:00", or "from 01.10.2026 to 31.10.2026" when the window
+// runs from midnight to midnight (the end then names the last day included). Arguments are wall ms.
+function windowWhen(aMs, bMs) {
+  const p2 = (n) => String(n).padStart(2, '0');
+  const a = new Date(aMs), b = new Date(bMs);
+  const atMidnight = (d) => d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+  const daysOnly = atMidnight(a) && atMidnight(b);
+  const last = daysOnly ? new Date(b.getTime() - 86400e3) : b;
+  const day = (d) => `${p2(d.getUTCDate())}.${p2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+  const hm = (d) => (daysOnly ? '' : ` ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`);
+  return `from ${day(a)}${hm(a)} to ${day(last)}${hm(b)}`;
+}
+
+function computeTitles(keys, data, when) {
+  const tot = aggregate(data, keys, 'total', state.units);
+  const hrs = aggregate(data, keys, 'hour', state.units);
+  const total = data.times.length;
   const titles = {};
   for (const k of keys) {
     const v = VAR_BY_KEY[k];
@@ -1351,28 +1371,11 @@ function computeTitles(keys) {
     }
     const missing = total - s.n[0];
     if (missing > 0) extra.push(`${missing} of ${total} h missing`);
+    if (when) extra.push(when); // the displayed window, last on the line
     t.extra = extra.join(' · ');
-    t.when = periodWhen(rawWindow.S, rawWindow.E, period.tz);
     titles[k] = t;
   }
   return titles;
-}
-
-// "from Mon 19 Oct 14:00 to Thu 22 Oct 2026 14:00", or "from Thu 1 Oct to Sat 31 Oct 2026" when the period runs
-// from midnight to midnight (the end then names the last day included). The year is written once
-// when both ends share it.
-function periodWhen(S, E, z) {
-  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const WDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const p2 = (n) => String(n).padStart(2, '0');
-  const a = new Date(wallMs(S, z)), b = new Date(wallMs(E, z));
-  const atMidnight = (d) => d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
-  const daysOnly = atMidnight(a) && atMidnight(b);
-  const last = daysOnly ? new Date(b.getTime() - 86400e3) : b;
-  const day = (d, withYear) => `${WDAY[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}${withYear ? ` ${d.getUTCFullYear()}` : ''}`;
-  const hm = (d) => (daysOnly ? '' : ` ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`);
-  const sameYear = a.getUTCFullYear() === last.getUTCFullYear();
-  return `from ${day(a, !sameYear)}${hm(a)} to ${day(last, true)}${hm(b)}`;
 }
 
 function renderResults() {
