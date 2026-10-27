@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=36';
+} from './vars.js?v=38';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=36';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=36';
-import { createRangeBar } from './rangebar.js?v=36';
+} from './data.js?v=38';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=38';
+import { createRangeBar } from './rangebar.js?v=38';
 
 const $ = (id) => document.getElementById(id);
 
@@ -929,14 +929,14 @@ async function ensureData({ S, E }) {
 }
 
 // ---------- Stable y scales ----------
-// To compare views by eye, each variable's y axis is fixed by a reference: the 97th percentile of
+// To compare views by eye, each variable's y axis is fixed by a reference: the 99th percentile of
 // its values (bars at the current aggregation level) over the saved period plus one year before and
-// one year after (never beyond now). For averaged variables the 3rd percentile sets the bottom.
+// one year after (never beyond now). For averaged variables the 1st percentile sets the bottom.
 // For sums (rain, snow…) only non-zero bars count, otherwise the many dry hours would pull the
 // percentile to 0. The axis only stretches beyond that when a higher (or lower) value is actually
 // on screen, once the view has stopped moving.
 
-const REF_HI = 0.97;
+const REF_HI = 0.99;
 const YEAR = 365.2425 * 86400;
 let ref = { key: '', data: null, stats: null, statsKey: '' };
 

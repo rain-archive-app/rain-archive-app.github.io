@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=36';
-import { fmtWall, STEP_MS } from './data.js?v=36';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=38';
+import { fmtWall, STEP_MS } from './data.js?v=38';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
