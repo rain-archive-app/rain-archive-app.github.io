@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=45';
-import { fmtWall, STEP_MS } from './data.js?v=45';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=46';
+import { fmtWall, STEP_MS } from './data.js?v=46';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -350,8 +350,9 @@ function baseOption(gran, theme, tooltipFmt, gridRight, gridLeft, zoom) {
   const step = STEP_MS[gran];
   const { min, max } = chartRange;
   const win = zoom ? { startValue: Math.max(min, zoom.startMs), endValue: Math.min(max, zoom.endMs) } : {};
-  // Wide bars just outside the window would otherwise spill into view: drop them (not for hours).
-  const filterMode = gran === 'hour' ? 'none' : 'filter';
+  // Bars just outside the window are dropped: ECharts does not reliably clip them at the plot edge
+  // with several x axes, and they would spill over the axis labels.
+  const filterMode = 'filter';
   return {
     useUTC: true, // x values are wall-clock times of the location, encoded as UTC
     animation: false,
