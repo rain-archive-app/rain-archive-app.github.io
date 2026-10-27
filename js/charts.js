@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=43';
-import { fmtWall, STEP_MS } from './data.js?v=43';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=45';
+import { fmtWall, STEP_MS } from './data.js?v=45';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -287,7 +287,7 @@ function describe(key, s, i, gran) {
 
 // Series for one variable. axes = {main, cum} y-axis indices.
 // endIdx: last bar on screen; the running total shows its value there, in bold.
-function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1) {
+function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX) {
   const v = VAR_BY_KEY[key];
   const pts = (arr) => x.map((t, i) => [t, arr[i]]);
   const out = [];
@@ -306,7 +306,7 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1) {
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
         label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: 11,
           formatter: () => endVal.toFixed(decimals(s.unit)) },
-        data: [{ coord: [x[endIdx], endVal] }],
+        data: [{ coord: [endX ?? x[endIdx], endVal] }],
       } });
   } else if (v.kind === 'dir' || v.kind === 'code') {
     out.push({ name: v.label, type: 'scatter', yAxisIndex: axes.main, data: pts(s.val), symbolSize: many ? 3 : 6, itemStyle: { color },
@@ -442,10 +442,9 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   Object.assign(chartRange, range, { minSpan: 3 * 3600e3 });
   const zoom = opts.zoom;
   const span = zoom ? zoom.endMs - zoom.startMs : range.max - range.min;
-  // Last bar that starts before the right edge of the view (where the "total" label goes).
-  const viewEnd = zoom ? zoom.endMs : range.max;
-  let endIdx = -1;
-  for (let i = agg.start.length - 1; i >= 0; i--) if (agg.start[i] < viewEnd) { endIdx = i; break; }
+  // Last bar on screen (chosen by the app, same bars as the title text): the running total's value
+  // is written there.
+  const endIdx = opts.endIdx ?? -1;
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - (mode === 'combined' ? 140 : 112)); // first guess
   tickUnit = unitFor(span);
   topShown = topFor(span);
@@ -488,7 +487,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
       const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
-      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx));
+      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
       if (sc && v.kind !== 'dir') {
@@ -512,7 +511,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, 36));
       const opt = baseOption(gran, theme, makeTooltip([k]), 56, 56, zoom);
       opt.yAxis = yAxes;
-      opt.series = seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx);
+      opt.series = seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX);
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });
   }

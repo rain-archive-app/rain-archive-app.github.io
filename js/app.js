@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=43';
+} from './vars.js?v=45';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=43';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=43';
-import { createRangeBar } from './rangebar.js?v=43';
+} from './data.js?v=45';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=45';
+import { createRangeBar } from './rangebar.js?v=45';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1313,12 +1313,38 @@ function clearResults() {
 
 function fmt(v, unit) { return v == null ? '–' : v.toFixed(decimals(unit)); }
 
-// Value per variable for the displayed window, shown under each chart title:
-// {agg: 'total'|'mean'|…, value, extra}. It follows the view (recomputed when
-// the view settles), not the saved period. Cached for an unchanged window, data and units.
-let titlesCache = { raw: null, key: '', titles: null };
-function buildTitles(keys) {
+// First and last bar whose middle lies inside the view. When the view is narrower than one bar (no
+// middle on screen), the bar under the middle of the view. null when there are no bars at all.
+function visibleBars(agg) {
   const s0 = zoomWin ? zoomWin.startMs : -Infinity, e0 = zoomWin ? zoomWin.endMs : Infinity;
+  let i0 = -1, i1 = -1;
+  agg.x.forEach((x, i) => { if (x >= s0 && x <= e0) { if (i0 < 0) i0 = i; i1 = i; } });
+  if (i0 < 0 && zoomWin) {
+    const mid = (s0 + e0) / 2;
+    i0 = i1 = agg.start.findIndex((b, i) => b <= mid && agg.end[i] > mid);
+  }
+  return i0 < 0 ? null : { i0, i1 };
+}
+
+// Running totals: nothing before the first bar on screen, then the sum from there on.
+function restartRunningTotals(agg, vis) {
+  for (const s of Object.values(agg.series)) {
+    if (!s.cum) continue;
+    let run = 0;
+    s.cum = s.val.map((v, i) => {
+      if (!vis || i < vis.i0) return null;
+      if (v != null) run += v;
+      return run;
+    });
+  }
+}
+
+// Value per variable for the bars on screen ([s0, e0] = from the start of the first to the end of
+// the last, wall ms), shown under each chart title: {agg: 'total'|'mean'|…, value, extra}. It follows
+// the view (recomputed when the view settles), not the saved period. Cached for an unchanged span.
+let titlesCache = { raw: null, key: '', titles: null };
+function buildTitles(keys, span) {
+  const [s0, e0] = span || [Infinity, -Infinity];
   const key = `${keys.join(',')}|${JSON.stringify(state.units)}|${s0}|${e0}`;
   if (titlesCache.raw === raw && titlesCache.key === key) return titlesCache.titles;
   // Hours inside the window: an hour stamped hh:00 covers (hh−1, hh].
@@ -1398,7 +1424,6 @@ function renderResults() {
     return true;
   }
   if (!raw.times.length) { setStatus('No data returned for this period.', 'error'); return false; }
-  const titles = buildTitles(keys);
 
   $('btn-fullscreen').hidden = false;
   const modeBtn = $('btn-chart-mode');
@@ -1408,15 +1433,20 @@ function renderResults() {
   modeBtn.title = combined ? 'Separate charts' : 'Combine charts';
   modeBtn.setAttribute('aria-label', modeBtn.title);
 
-  // Running totals start with the bar that contains the left edge of the view.
-  const cumFrom = zoomWin ? bucketBounds(zoomWin.startMs + 1, state.agg)[0] : -Infinity;
-  const agg = aggregate(raw, keys, state.agg, state.units, cumFrom);
+  const agg = aggregate(raw, keys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;
+  // The bars "on screen" are those whose middle is inside the view. The text under the title, the
+  // running total and its value at the end of the line all use exactly these bars, so they agree.
+  const vis = visibleBars(agg);
+  restartRunningTotals(agg, vis);
+  const titles = buildTitles(keys, vis && [agg.start[vis.i0], agg.end[vis.i1]]);
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
-    { range, zoom: zoomWin, onZoom: onChartZoom, titles, yScale: yScales(keys, agg) });
+    { range, zoom: zoomWin, onZoom: onChartZoom, titles, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1,
+      // Where the value is written: the last bar's middle, kept on screen when that bar is wider than the view.
+      endX: vis && zoomWin ? Math.min(Math.max(agg.x[vis.i1], zoomWin.startMs), zoomWin.endMs) : undefined });
   // Time bar: the axis range, the visible window, and the first variable's profile.
   $('rangebar').hidden = false;
   lastShadow = agg.x.map((x, i) => [x, agg.series[keys[0]].val[i]]);
