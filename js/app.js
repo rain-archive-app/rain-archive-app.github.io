@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=56';
+} from './vars.js?v=58';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=56';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=56';
-import { createRangeBar } from './rangebar.js?v=56';
+} from './data.js?v=58';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=58';
+import { createRangeBar } from './rangebar.js?v=58';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,8 +42,9 @@ document.querySelectorAll('.dt').forEach((el) => {
   }
 });
 const STORE_KEY = 'rain-archive-state';
-// MapTiler API key (free plan), restricted in MapTiler's dashboard to the app's site and 127.0.0.1.
-const MAPTILER_KEY = 'AgLcaCLlnBP2fhhC9B01';
+// Mapbox style (made in Mapbox Studio) and public access token (free plan, no card on file).
+const MAPBOX_STYLE = 'gregstigli/cmvs4zctk002y01qodrec93a9';
+const MAPBOX_TOKEN = 'pk.eyJ1IjoiZ3JlZ3N0aWdsaSIsImEiOiJjbXZzMW5kbTIwMTl6MnhzMXM1ZG41NXQ1In0.8mstinjO817aFMV3ZMJ2Gg';
 const MIN_DATE = Date.UTC(1940, 0, 1) / 1000;
 const MAX_SPAN_DAYS = 366 * 20;
 
@@ -522,14 +523,21 @@ function openMap(opts = {}) {
   dlg.showModal();
   if (!map) {
     map = L.map('map', { worldCopyJump: true });
-    // MapTiler Topo (free plan; the key only works from the app's own site). 512 px tiles: a quarter
-    // of the requests counted against the monthly quota. If MapTiler stops answering (quota used up,
-    // key refused), the map falls back to OpenTopoMap.
-    const topo = L.tileLayer(`https://api.maptiler.com/maps/topo-v4/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`, {
+    // Our Mapbox Studio style, served as raster tiles (Static Tiles API). 512 px tiles: a quarter of
+    // the requests counted against the monthly quota. If Mapbox stops answering (quota used up,
+    // token refused), the map falls back to OpenTopoMap.
+    const topo = L.tileLayer(`https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/tiles/512/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
       tileSize: 512, zoomOffset: -1, minZoom: 1, maxZoom: 19, crossOrigin: true,
-      attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> '
-        + '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>',
+      attribution: '<a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener">© Mapbox</a> '
+        + '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> '
+        + '<a href="https://www.mapbox.com/map-feedback/" target="_blank" rel="noopener"><strong>Improve this map</strong></a>',
     }).addTo(map);
+    // Mapbox's terms require their wordmark on maps showing their tiles.
+    const logo = L.control({ position: 'bottomleft' });
+    logo.onAdd = () => L.DomUtil.create('div', 'mapbox-logo-wrap');
+    logo.addTo(map);
+    logo.getContainer().innerHTML = '<a class="mapbox-logo" href="https://www.mapbox.com/" target="_blank" rel="noopener" aria-label="Mapbox"></a>';
+    topo.on('remove', () => logo.remove());
     let tileErrors = 0;
     topo.on('tileerror', () => {
       if (++tileErrors < 4 || !map.hasLayer(topo)) return;

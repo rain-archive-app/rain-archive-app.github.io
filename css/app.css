@@ -313,3 +313,6 @@ dialog.confirm p { margin: 0 0 8px; }
 dialog::backdrop { background: rgba(0,0,0,.45); }
 .dialog-head, .dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; }
 #map { flex: 1; min-height: 200px; }
+/* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
+.mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
+  background-image: url("../icons/mapbox-logo.svg?v=58"); }
