@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=55';
+} from './vars.js?v=56';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=55';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=55';
-import { createRangeBar } from './rangebar.js?v=55';
+} from './data.js?v=56';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=56';
+import { createRangeBar } from './rangebar.js?v=56';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,6 +42,8 @@ document.querySelectorAll('.dt').forEach((el) => {
   }
 });
 const STORE_KEY = 'rain-archive-state';
+// MapTiler API key (free plan), restricted in MapTiler's dashboard to the app's site and 127.0.0.1.
+const MAPTILER_KEY = 'AgLcaCLlnBP2fhhC9B01';
 const MIN_DATE = Date.UTC(1940, 0, 1) / 1000;
 const MAX_SPAN_DAYS = 366 * 20;
 
@@ -520,10 +522,23 @@ function openMap(opts = {}) {
   dlg.showModal();
   if (!map) {
     map = L.map('map', { worldCopyJump: true });
-    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-      maxZoom: 17, subdomains: 'abc',
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM · style © <a href="https://opentopomap.org/">OpenTopoMap</a> (CC BY-SA)',
+    // MapTiler Topo (free plan; the key only works from the app's own site). 512 px tiles: a quarter
+    // of the requests counted against the monthly quota. If MapTiler stops answering (quota used up,
+    // key refused), the map falls back to OpenTopoMap.
+    const topo = L.tileLayer(`https://api.maptiler.com/maps/topo-v4/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`, {
+      tileSize: 512, zoomOffset: -1, minZoom: 1, maxZoom: 19, crossOrigin: true,
+      attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> '
+        + '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>',
     }).addTo(map);
+    let tileErrors = 0;
+    topo.on('tileerror', () => {
+      if (++tileErrors < 4 || !map.hasLayer(topo)) return;
+      map.removeLayer(topo);
+      L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17, subdomains: 'abc',
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM · style © <a href="https://opentopomap.org/">OpenTopoMap</a> (CC BY-SA)',
+      }).addTo(map);
+    });
     favLayer = L.layerGroup().addTo(map);
     map.on('click', (e) => { const p = e.latlng.wrap(); pickPoint(p.lat, p.lng); });
   }
