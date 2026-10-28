@@ -1,23 +1,23 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=46';
+} from './vars.js?v=55';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=46';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange } from './charts.js?v=46';
-import { createRangeBar } from './rangebar.js?v=46';
+} from './data.js?v=55';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=55';
+import { createRangeBar } from './rangebar.js?v=55';
 
 const $ = (id) => document.getElementById(id);
 
 // Date + time pickers of the Period panel: a date field (required, so browsers show no "Clear"
-// button) and a time list in 30-minute steps. The wrapper element behaves like one input:
-// .value is "YYYY-MM-DDTHH:mm", .disabled, and a single 'change' event.
+// button) and a list of whole hours (the data are hourly). The wrapper element behaves like one
+// input: .value is "YYYY-MM-DDTHH:mm", .disabled, and a single 'change' event.
 document.querySelectorAll('.dt').forEach((el) => {
   const [date, time] = el.children;
-  for (let m = 0; m < 24 * 60; m += 30) {
-    const v = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  for (let h = 0; h < 24; h++) {
+    const v = `${String(h).padStart(2, '0')}:00`;
     time.add(new Option(v, v));
   }
   let last = '';
@@ -27,9 +27,8 @@ document.querySelectorAll('.dt').forEach((el) => {
       last = v || '';
       const [d, t = '00:00'] = last.split('T');
       date.value = d || '';
-      const [h, mi] = t.split(':').map(Number);
-      const q = Math.floor((mi || 0) / 30) * 30; // snap to :00 / :30
-      time.value = `${String(h || 0).padStart(2, '0')}:${String(q).padStart(2, '0')}`;
+      const h = Number(t.split(':')[0]) || 0; // snap to the whole hour
+      time.value = `${String(h).padStart(2, '0')}:00`;
     },
   });
   Object.defineProperty(el, 'disabled', { set: (b) => { date.disabled = b; time.disabled = b; }, get: () => date.disabled });
@@ -83,6 +82,7 @@ function load() {
       }
     }
   } catch { /* storage unavailable */ }
+  delete state.quarter; delete state.detail; // former 15-minute detail settings
   state.vars = state.vars.filter((k) => VAR_BY_KEY[k]);
   if (!state.loc) state.loc = LAUSANNE;
   // Every opening starts on the last 3 days up to now, hour by hour; place, favorites, variables,
@@ -783,7 +783,7 @@ function renderModels() {
 }
 
 // ---------- Data model ----------
-// period: hourly data of the saved period; the totals in the chart titles come from it.
+// period: hourly data of the saved period (its time range is the saved Period).
 // raw:    hourly data behind the chart, contiguous over [raw.loadedS, raw.loadedE] (unix s).
 //         It starts as the period and grows (or is replaced) as the view moves.
 // axis:   the chart's time axis [axis.S, axis.E]: the visible window plus one window-width on each
@@ -1032,6 +1032,7 @@ function scheduleRelayout(delay = 350) { clearTimeout(relayoutTimer); relayoutTi
 async function relayout() {
   if (!raw || !zoomWin || !axis) return;
   if (rangeBar.isDragging()) { scheduleRelayout(); return; }
+  snapView();
   const vS = unwall(zoomWin.startMs), vE = unwall(zoomWin.endMs);
   const span = vE - vS;
   const nearLeft = vS - axis.S < span * 0.5 && axis.S > MIN_DATE;
@@ -1051,10 +1052,30 @@ async function relayout() {
   renderResults();
 }
 
+// Once a zoom or pan settles, the bounds snap to the precision the time bar writes them in (whole
+// days or hours), or to the ends of the axis.
+let snapped = null; // the window just set by snapView, whose own zoom event must not count as a user change
+function snapView() {
+  const { min, max, minSpan } = chartRange;
+  const st = boundStep(zoomWin.endMs - zoomWin.startMs);
+  const round = (t) => Math.round(t / st) * st;
+  let s = Math.max(min, round(zoomWin.startMs)), e = Math.min(max, round(zoomWin.endMs));
+  const least = Math.ceil(minSpan / st) * st;
+  if (e - s < least) { e = Math.min(max, s + least); s = Math.max(min, e - least); }
+  if (s === zoomWin.startMs && e === zoomWin.endMs) return;
+  zoomWin = { startMs: s, endMs: e };
+  snapped = { ...zoomWin };
+  rangeBar.update({ start: s, end: e });
+  setZoom(s, e);
+}
+
 function onChartZoom(z) {
   zoomWin = { startMs: z.startMs, endMs: z.endMs };
-  setActiveView(null);
   rangeBar.update({ start: z.startMs, end: z.endMs });
+  const own = snapped && Math.abs(z.startMs - snapped.startMs) < 1e3 && Math.abs(z.endMs - snapped.endMs) < 1e3;
+  if (own) return; // relayout is already running
+  snapped = null;
+  setActiveView(null);
   scheduleRelayout();
 }
 
@@ -1339,71 +1360,6 @@ function restartRunningTotals(agg, vis) {
   }
 }
 
-// Value per variable for the bars on screen ([s0, e0] = from the start of the first to the end of
-// the last, wall ms), shown under each chart title: {agg: 'total'|'mean'|…, value, extra}. It follows
-// the view (recomputed when the view settles), not the saved period. Cached for an unchanged span.
-let titlesCache = { raw: null, key: '', titles: null };
-function buildTitles(keys, span) {
-  const [s0, e0] = span || [Infinity, -Infinity];
-  const key = `${keys.join(',')}|${JSON.stringify(state.units)}|${s0}|${e0}`;
-  if (titlesCache.raw === raw && titlesCache.key === key) return titlesCache.titles;
-  // Hours inside the window: an hour stamped hh:00 covers (hh−1, hh].
-  const idx = [];
-  raw.times.forEach((t, i) => { const w = wallMs(t, raw.tz); if (w - 3600e3 >= s0 - 1 && w <= e0 + 1) idx.push(i); });
-  const win = { ...raw, times: idx.map((i) => raw.times[i]), values: Object.fromEntries(keys.map((k) => [k, idx.map((i) => raw.values[k][i])])) };
-  const when = idx.length ? windowWhen(wallMs(win.times[0], raw.tz) - 3600e3, wallMs(win.times[idx.length - 1], raw.tz)) : '';
-  const titles = computeTitles(keys, win, when);
-  titlesCache = { raw, key, titles };
-  return titles;
-}
-// "from 24.10.2026 17:00 to 27.10.2026 17:00", or "from 01.10.2026 to 31.10.2026" when the window
-// runs from midnight to midnight (the end then names the last day included). Arguments are wall ms.
-function windowWhen(aMs, bMs) {
-  const p2 = (n) => String(n).padStart(2, '0');
-  const a = new Date(aMs), b = new Date(bMs);
-  const atMidnight = (d) => d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
-  const daysOnly = atMidnight(a) && atMidnight(b);
-  const last = daysOnly ? new Date(b.getTime() - 86400e3) : b;
-  const day = (d) => `${p2(d.getUTCDate())}.${p2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
-  const hm = (d) => (daysOnly ? '' : ` ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`);
-  return `from ${day(a)}${hm(a)} to ${day(last)}${hm(b)}`;
-}
-
-function computeTitles(keys, data, when) {
-  const tot = aggregate(data, keys, 'total', state.units);
-  const hrs = aggregate(data, keys, 'hour', state.units);
-  const total = data.times.length;
-  const titles = {};
-  for (const k of keys) {
-    const v = VAR_BY_KEY[k];
-    const s = tot.series[k];
-    const t = {};
-    if (v.kind === 'code') { t.agg = 'most severe'; t.value = wmoLabel(s.val[0]); }
-    else if (v.kind === 'dir') { t.agg = 'mean'; t.value = s.val[0] == null ? '–' : `${Math.round(s.val[0])}° ${compass(s.val[0])}`; }
-    else { t.agg = v.kind === 'sum' ? 'total' : 'mean'; t.value = `${fmt(s.val[0], s.unit)} ${s.unit}`; }
-    const extra = [];
-    if (v.kind === 'sum') {
-      let wet = 0, top = null; // a loop, not Math.max(...h): years of hours overflow the argument list
-      for (const x of hrs.series[k].val) {
-        if (x == null) continue;
-        if (x > 0) wet++;
-        if (top == null || x > top) top = x;
-      }
-      extra.push(`max ${fmt(top, s.unit)} ${s.unit}/h`);
-      if (v.key === 'sunshine_duration') extra.push(`${wet} h with sun`);
-      else if ((v.family === 'precip' && v.key !== 'et0_fao_evapotranspiration') || v.family === 'snow') extra.push(`${wet} wet h`);
-    } else if (v.kind === 'mean') {
-      extra.push(`min ${fmt(s.min[0], s.unit)} · max ${fmt(s.max[0], s.unit)} ${s.unit}`);
-    }
-    const missing = total - s.n[0];
-    if (missing > 0) extra.push(`${missing} of ${total} h missing`);
-    if (when) extra.push(when); // the displayed window, last on the line
-    t.extra = extra.join(' · ');
-    titles[k] = t;
-  }
-  return titles;
-}
-
 function renderResults() {
   if (!raw || !period) return false;
   const keys = state.vars.filter((k) => k in raw.values);
@@ -1435,16 +1391,15 @@ function renderResults() {
 
   const agg = aggregate(raw, keys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;
-  // The bars "on screen" are those whose middle is inside the view. The text under the title, the
-  // running total and its value at the end of the line all use exactly these bars, so they agree.
+  // The bars "on screen" are those whose middle is inside the view: the running total starts at the
+  // first of them and its value is written at the last.
   const vis = visibleBars(agg);
   restartRunningTotals(agg, vis);
-  const titles = buildTitles(keys, vis && [agg.start[vis.i0], agg.end[vis.i1]]);
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
-    { range, zoom: zoomWin, onZoom: onChartZoom, titles, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1,
+    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1,
       // Where the value is written: the last bar's middle, kept on screen when that bar is wider than the view.
       endX: vis && zoomWin ? Math.min(Math.max(agg.x[vis.i1], zoomWin.startMs), zoomWin.endMs) : undefined });
   // Time bar: the axis range, the visible window, and the first variable's profile.
@@ -1485,7 +1440,8 @@ $('btn-fullscreen').onclick = () => {
 document.addEventListener('fullscreenchange', onFullscreenChange);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('results').classList.contains('fs')) setFallbackFullscreen(false); });
 
-const rangeBar = createRangeBar($('rangebar'), { onChange: setZoom, onEnd: () => scheduleRelayout(0), minSpan: 3 * 3600e3 });
+const rangeBar = createRangeBar($('rangebar'), { onChange: setZoom, onEnd: () => scheduleRelayout(0), minSpan: 3 * 3600e3,
+  stepFor: (span) => boundStep(span) });
 let lastShadow = null;
 
 let resizeTimer;

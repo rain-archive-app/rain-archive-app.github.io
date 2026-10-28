@@ -37,16 +37,20 @@ function ticks(min, max, widthPx) {
   return out;
 }
 
-// Date of a window bound, in the precision of the time step (unit: hour, day, month, year).
+// Date of a window bound, in the precision of the time step (unit: hour, day, month, year), with the
+// time of day when withTime: "8h", "8h30", "8h15".
 function fmtBound(ms, unit, withTime) {
   const d = new Date(ms);
   if (unit === 'year') return String(d.getUTCFullYear());
   if (unit === 'month') return `${MO[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   const s = `${d.getUTCDate()} ${MO[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-  return withTime ? `${s} ${d.getUTCHours()}h` : s; // whole hours, never minutes
+  if (!withTime) return s;
+  const m = d.getUTCMinutes();
+  return `${s} ${d.getUTCHours()}h${m ? String(m).padStart(2, '0') : ''}`;
 }
 
-export function createRangeBar(el, { onChange, onEnd, minSpan }) {
+// stepFor(spanMs): precision of the bound labels for a window of that length (ms; ≥ 1 day = date only).
+export function createRangeBar(el, { onChange, onEnd, minSpan, stepFor = () => H }) {
   el.innerHTML = '<div class="rb-track"><svg class="rb-svg" preserveAspectRatio="none" aria-hidden="true"><g class="rb-ticks"></g><path class="rb-shadow"/></svg>'
     + '<div class="rb-thumb"><span class="rb-h rb-l"></span><span class="rb-h rb-r"></span></div></div>'
     + '<div class="rb-labels"><span class="rb-lab rb-lab-l"></span><span class="rb-lab rb-lab-r"></span></div>';
@@ -64,18 +68,25 @@ export function createRangeBar(el, { onChange, onEnd, minSpan }) {
 
   function drawLabels() {
     const w = W(), l = toX(start), r = toX(end);
-    // The window is [start, end): an hourly end is shown as is (end of the last hour), otherwise
-    // the end label names the last day, month or year included.
-    const time = unit === 'hour' && max - min <= 3 * D; // hours only when the bar spans 3 days or less
-    labL.textContent = fmtBound(start, unit, time);
-    labR.textContent = fmtBound(unit === 'hour' ? end : end - 1, unit, time);
+    // Date and time of each bound, rounded to the current step. Per month or year the bounds are month
+    // or year starts, written as such; with a step of a day or more, only dates are written, and the
+    // end then names the last month, year or day included.
+    const step = stepFor(end - start);
+    const coarse = unit === 'month' || unit === 'year' || step >= D;
+    const round = (ms) => Math.round(ms / step) * step;
+    labL.textContent = fmtBound(coarse ? start : round(start), unit, !coarse);
+    labR.textContent = fmtBound(coarse ? end - 1 : round(end), unit, !coarse);
     const lw = labL.offsetWidth, rw = labR.offsetWidth;
-    // Left label starts at the left edge and the right one ends at the right edge; when they
-    // would collide, push them outwards (left label ends at the left edge, and vice versa).
-    let lx = l, rx = r - rw;
-    if (lx + lw + 6 > rx) { lx = l - lw; rx = r; }
-    labL.style.left = `${Math.min(Math.max(0, lx), w - lw)}px`;
-    labR.style.left = `${Math.min(Math.max(0, rx), w - rw)}px`;
+    // Each label is centred under its bound; if they would overlap, both move apart by the same
+    // amount, and they always stay within the bar.
+    let lx = l - lw / 2, rx = r - rw / 2;
+    const overlap = lx + lw + 8 - rx;
+    if (overlap > 0) { lx -= overlap / 2; rx += overlap / 2; }
+    lx = Math.min(Math.max(0, lx), w - lw);
+    rx = Math.min(Math.max(0, rx), w - rw);
+    if (lx + lw + 8 > rx) { if (lx === 0) rx = lx + lw + 8; else lx = rx - lw - 8; } // pinned at an edge
+    labL.style.left = `${lx}px`;
+    labR.style.left = `${rx}px`;
   }
 
   function draw() {

@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=46';
-import { fmtWall, STEP_MS } from './data.js?v=46';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=55';
+import { fmtWall, STEP_MS } from './data.js?v=55';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -69,6 +69,11 @@ let plotWidth = 260;
 function unitFor(spanMs) {
   const pxPerMs = plotWidth / spanMs;
   return TICK_UNITS.find(([ms, , px]) => ms * pxPerMs >= px) || TICK_UNITS[TICK_UNITS.length - 1];
+}
+// Precision of the window bounds (time bar labels and snapping), from how dense the axis labels are:
+// labels sparser than every 2 days → whole days; otherwise whole hours (the data are hourly).
+export function boundStep(spanMs) {
+  return ['w', 'm', 'y'].includes(unitFor(spanMs)[1]) ? 24 * 3600e3 : 3600e3;
 }
 // Weekdays on top whenever the bottom labels name days ("19 Oct"), whatever the aggregation level.
 const topFor = (spanMs) => ['h', 'd', 'w'].includes(unitFor(spanMs)[1]);
@@ -211,21 +216,14 @@ function attachTouch(chart, el) {
 
 // ---------- Titles, tooltip ----------
 
-// Title: "● Rain", then one grey line for the displayed window:
-// "total 21.1 mm · max 2.4 mm/h · 37 wet h" (value and unit in bold). t = {agg, value, extra}.
+// Title: just "● Rain" (the total is written on the running-total line).
 function titleEl(key, color) {
   const el = document.createElement('div');
   el.className = 'chart-title';
-  el.innerHTML = '<span class="dot"></span><span class="name"></span>'
-    + '<span class="sub"><span class="k"></span> <b></b><span class="extra"></span></span>';
+  el.innerHTML = '<span class="dot"></span><span class="name"></span>';
   el.querySelector('.dot').style.background = color;
   el.querySelector('.name').textContent = VAR_BY_KEY[key].label;
   return el;
-}
-function fillTitle(el, t) {
-  el.querySelector('.k').textContent = t?.agg || '';
-  el.querySelector('b').textContent = t?.value || '–';
-  el.querySelector('.extra').textContent = t?.extra ? ` · ${t.extra}` : '';
 }
 
 export function disposeCharts() {
@@ -244,6 +242,44 @@ export function resizeCharts() {
   instances.forEach((c) => c.resize());
   measurePlot();
   if (current) refreshLabels(null, view.s, view.e, current.gran, current.theme);
+  placeTotalLabels();
+}
+
+// The "Total …" label sits above the end of the running-total line, but must stay between the top
+// and bottom lines of the plot. When there is no room above, it goes below the point, on a 50 %
+// transparent background so it stays readable over the bars (and the other way round at the bottom).
+const LABEL_H = 15; // px, one line of 11 px bold text
+function halfTransparent(color) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return 'rgba(255,255,255,0.5)';
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},0.5)`;
+}
+function placeTotalLabels() {
+  const bg = halfTransparent(css('--card'));
+  for (const chart of instances) {
+    const o = chart.getOption();
+    const rect = chart.getModel().getComponent('grid')?.coordinateSystem?.getRect();
+    if (!rect) continue;
+    let changed = false;
+    const series = o.series.map((s, i) => {
+      const coord = s.markPoint?.data?.[0]?.coord;
+      if (!coord) return {};
+      // Measured on the running total's own y axis (the right-hand Σ axis), not the first one.
+      const py = chart.convertToPixel({ yAxisIndex: s.yAxisIndex ?? 0 }, coord[1]);
+      if (py == null || Number.isNaN(py)) return {};
+      const roomAbove = py - 4 - LABEL_H >= rect.y;
+      const roomBelow = py + 4 + LABEL_H <= rect.y + rect.height;
+      const below = !roomAbove && roomBelow;
+      const want = below ? 'bottom' : 'top';
+      if (s.markPoint.label?.position === want) return {};
+      changed = true;
+      return { markPoint: { label: below
+        ? { position: 'bottom', backgroundColor: bg, padding: [1, 3], borderRadius: 3 }
+        : { position: 'top', backgroundColor: 'transparent', padding: 0 } } };
+    });
+    if (changed) chart.setOption({ series });
+  }
 }
 
 export function setZoom(startMs, endMs) {
@@ -302,10 +338,12 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX) {
       lineStyle: { color: theme.text, width: 1.5, type: 'dashed', opacity: 0.8 }, itemStyle: { color: theme.text }, z: 3,
       markPoint: endVal == null ? { data: [] } : {
         symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: theme.text },
-        // Just the number, in bold, right above the end of the line (no word, no unit, no background).
+        // "Total" and the number, in bold, right above the end of the line (no unit, no background).
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
+        // (placeTotalLabels moves it below the point, on a background, when there is no room above)
         label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: 11,
-          formatter: () => endVal.toFixed(decimals(s.unit)) },
+          backgroundColor: 'transparent', padding: 0,
+          formatter: () => `Total ${endVal.toFixed(decimals(s.unit))}` },
         data: [{ coord: [endX ?? x[endIdx], endVal] }],
       } });
   } else if (v.kind === 'dir' || v.kind === 'code') {
@@ -429,7 +467,6 @@ export function renderEmpty(container, gran, message, opts = {}) {
  * agg: result of aggregate(); keys: variables; gran: 'hour'|'day'|'month'|'year'; mode: 'stacked'|'combined'.
  * opts.range: {min, max} x range (wall ms), defaults to the data extent;
  * opts.zoom: {startMs, endMs} visible window (wall ms);
- * opts.titles: {key: {agg, value, extra}};
  * opts.onZoom({startMs, endMs}) is called after the user zooms or pans.
  */
 export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
@@ -437,7 +474,6 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   const theme = themeColors();
   const { x, hours, series } = agg;
   const color = (k) => colorFor(keys, k);
-  const titles = opts.titles || {};
   const step = STEP_MS[gran];
   const range = opts.range || { min: agg.start[0], max: agg.end[agg.end.length - 1] };
   Object.assign(chartRange, range, { minSpan: 3 * 3600e3 });
@@ -526,8 +562,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   };
   if (current && current.sig === sig && instances.length === charts.length) {
     charts.forEach((c, i) => instances[i].setOption(c.opt));
-    keys.forEach((k) => fillTitle(current.titleEls[k], titles[k]));
     fitLabels();
+    placeTotalLabels();
     return;
   }
 
@@ -558,8 +594,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
     if (mode !== 'combined') chart.group = GROUP;
     instances.push(chart);
   });
-  keys.forEach((k) => fillTitle(titleEls[k], titles[k]));
   if (mode !== 'combined') echarts.connect(GROUP);
   current = { sig, titleEls, gran, theme };
   fitLabels();
+  placeTotalLabels();
 }
