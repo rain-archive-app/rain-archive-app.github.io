@@ -315,4 +315,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 #map { flex: 1; min-height: 200px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=58"); }
+  background-image: url("../icons/mapbox-logo.svg?v=59"); }

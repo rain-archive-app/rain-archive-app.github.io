@@ -1,5 +1,5 @@
 // Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=58';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=59';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -131,11 +131,27 @@ export function fmtDuration(hours) {
 // ---------- HTTP ----------
 
 async function getJSON(url, signal) {
-  const res = await fetch(url, { signal });
+  let res;
+  try {
+    res = await fetch(url, { signal });
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    throw new Error(navigator.onLine === false
+      ? 'you seem to be offline. Check your connection and try again.'
+      : 'the weather service (Open-Meteo) could not be reached. Try again in a few minutes.');
+  }
   let body = null;
   try { body = await res.json(); } catch { /* non-JSON error */ }
-  if (!res.ok || !body || body.error) throw new Error(body?.reason || `HTTP ${res.status}`);
-  return body;
+  if (res.ok && body && !body.error) return body;
+  // Outages and rate limits are on Open-Meteo's side: say so rather than show their raw reason.
+  if (res.status === 429) {
+    throw new Error('too many requests to the weather service (Open-Meteo) for now. Try again later.');
+  }
+  if (res.status >= 500) {
+    throw new Error('the weather service (Open-Meteo) is overloaded or down right now. '
+      + 'This is on their side, not the app\'s. Try again in a few minutes.');
+  }
+  throw new Error(body?.reason || `HTTP ${res.status}`);
 }
 
 export async function searchPlaces(name, signal) {
