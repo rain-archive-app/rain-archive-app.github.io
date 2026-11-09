@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=61';
+} from './vars.js?v=62';
 import {
   HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=61';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=61';
-import { createRangeBar } from './rangebar.js?v=61';
+} from './data.js?v=62';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=62';
+import { createRangeBar } from './rangebar.js?v=62';
 
 const $ = (id) => document.getElementById(id);
 
@@ -837,6 +837,7 @@ function renderModels() {
 
 let period = null;
 let axis = null;
+let pendingMark = null; // first period mark dropped, waiting for the second: { which, t }
 
 function setStatus(msg, kind = '') {
   const el = $('status');
@@ -1115,6 +1116,7 @@ function snapView() {
 function onChartZoom(z) {
   zoomWin = { startMs: z.startMs, endMs: z.endMs };
   rangeBar.update({ start: z.startMs, end: z.endMs });
+  placePendingLine();
   const own = snapped && Math.abs(z.startMs - snapped.startMs) < 1e3 && Math.abs(z.endMs - snapped.endMs) < 1e3;
   if (own) return; // relayout is already running
   snapped = null;
@@ -1229,8 +1231,8 @@ document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
 });
 
 // ---------- In / out marks ----------
-// Drag the start mark (or the end mark) from the toolbar and drop it on a chart or on the time bar:
-// the saved period then starts (or ends) there. The drop point snaps to an hour, or to a bar boundary when
+// Drag the start mark and the end mark from the toolbar and drop them on a chart or on the time bar:
+// the saved period then runs between them. The drop point snaps to an hour, or to a bar boundary when
 // the data are aggregated per day, week, month or year. A dashed line shows where it will land.
 
 const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1278,18 +1280,75 @@ function showGuide(which, hit) {
   guide.hidden = false;
 }
 
-// A dropped mark becomes the start (or end) of the saved period: the Period panel switches to
-// "Date range" with that bound, the other bound is kept, and the data are reloaded.
-function applyMark(which, t) {
+// A first dropped mark only waits on the chart, so that nothing moves while the second one is placed
+// (zooming and panning stay free). Dropping the other mark applies both; "Keep current…" applies the first alone.
+const otherMark = (which) => (which === 'start' ? 'end' : 'start');
+
+function showPendingMark() {
+  $('mark-pending').hidden = !pendingMark;
+  document.querySelectorAll('#view-btns button[data-mark]').forEach((b) => {
+    b.classList.toggle('next', !!pendingMark && b.dataset.mark === otherMark(pendingMark.which));
+  });
+  if (pendingMark) {
+    const other = otherMark(pendingMark.which);
+    $('mark-pending-text').textContent = `Period ${pendingMark.which}: ${markLabel(pendingMark.t)}. Now drop the ${other} mark.`;
+    $('mark-keep').textContent = `Keep current ${other}`;
+  }
+  placePendingLine();
+}
+
+// The waiting mark's line, kept in place as the chart zooms and pans.
+function placePendingLine() {
+  const line = $('mark-line');
+  const chartEl = pendingMark && $('charts').querySelector('.chart');
+  const grid = chartEl && echarts.getInstanceByDom(chartEl)?.getModel()?.getComponent('grid')?.coordinateSystem?.getRect();
+  const s = zoomWin ? zoomWin.startMs : chartRange.min, e = zoomWin ? zoomWin.endMs : chartRange.max;
+  const f = grid ? (pendingMark.t - s) / (e - s) : -1;
+  if (f < 0 || f > 1) { line.hidden = true; return; }
+  const wrap = line.parentElement.getBoundingClientRect();
+  line.style.left = `${chartEl.getBoundingClientRect().left - wrap.left + grid.x + f * grid.width}px`;
+  line.classList.toggle('end', pendingMark.which === 'end');
+  line.firstChild.textContent = markLabel(pendingMark.t);
+  line.hidden = false;
+}
+
+function clearPendingMark() {
+  pendingMark = null;
+  showPendingMark();
+}
+
+function dropMark(which, t) {
+  if (!pendingMark || pendingMark.which === which) {
+    pendingMark = { which, t };
+    showPendingMark();
+    return;
+  }
+  if (t === pendingMark.t) {
+    setStatus('Both marks fall on the same time: drop this one elsewhere.', 'error');
+    return;
+  }
+  applyMarks({ [pendingMark.which]: pendingMark.t, [which]: t });
+}
+
+$('mark-keep').onclick = () => { if (pendingMark) applyMarks({ [pendingMark.which]: pendingMark.t }); };
+$('mark-cancel').onclick = clearPendingMark;
+
+// Dropped marks become the start and/or end of the saved period: the Period panel switches to
+// "Date range" with those bounds, a bound without mark is kept, and the data are reloaded.
+function applyMarks({ start, end }) {
+  clearPendingMark();
+  setStatus('');
   const z = raw.tz;
-  const sec = unwall(t);
   let S = rawWindow.S, E = rawWindow.E;
   const len = E - S;
-  if (which === 'start') {
-    S = sec;
+  if (start != null && end != null) {
+    S = unwall(Math.min(start, end)); // dropped the wrong way round: the earlier one is the start
+    E = unwall(Math.max(start, end));
+  } else if (start != null) {
+    S = unwall(start);
     if (E - S < HOUR) E = S + len; // dropped after the end: keep the length
   } else {
-    E = sec;
+    E = unwall(end);
     if (E - S < HOUR) S = E - len;
   }
   Object.assign(state, {
@@ -1333,7 +1392,7 @@ document.querySelectorAll('#view-btns button[data-mark]').forEach((btn) => {
     drag = null;
     ghost.hidden = true;
     $('mark-guide').hidden = true;
-    if (moved && hit && e.type === 'pointerup') applyMark(which, hit.snapped);
+    if (moved && hit && e.type === 'pointerup') dropMark(which, hit.snapped);
     if (!moved) {
       setStatus(`Drag this mark onto the chart to set the ${which} of the period.`);
       clearTimeout(markHintTimer);
@@ -1363,6 +1422,7 @@ function modelUsedText(keys, S, E) {
 }
 
 function clearResults() {
+  clearPendingMark();
   raw = null;
   period = null;
   axis = null;
@@ -1420,6 +1480,7 @@ function renderResults() {
     rangeBar.update({ ...chartRange, start: zoomWin ? zoomWin.startMs : chartRange.min, end: zoomWin ? zoomWin.endMs : chartRange.max,
       shadow: [], unit: state.agg });
     $('model-used').textContent = '';
+    placePendingLine();
     return true;
   }
   if (!raw.times.length) { setStatus('No data returned for this period.', 'error'); return false; }
@@ -1452,6 +1513,7 @@ function renderResults() {
     shadow: lastShadow, unit: state.agg });
 
   $('model-used').textContent = modelUsedText(keys, rawWindow.S, rawWindow.E);
+  placePendingLine();
   return true;
 }
 
@@ -1468,7 +1530,7 @@ function onFullscreenChange() {
   const on = !!document.fullscreenElement || $('results').classList.contains('fs');
   $('btn-fullscreen').title = on ? 'Exit full screen' : 'Full screen';
   $('btn-fullscreen').setAttribute('aria-pressed', on);
-  setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); }, 120);
+  setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); placePendingLine(); }, 120);
 }
 function setFallbackFullscreen(on) {
   $('results').classList.toggle('fs', on);
@@ -1490,7 +1552,7 @@ let lastShadow = null;
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); }, 150);
+  resizeTimer = setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); placePendingLine(); }, 150);
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderResults());
 

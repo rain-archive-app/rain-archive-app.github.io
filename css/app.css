@@ -234,6 +234,11 @@ details.sub > summary { font-weight: 400; }
   background: var(--accent); color: var(--accent-text); font-size: 11px;
 }
 .mark-guide.end span { left: auto; right: 4px; }
+/* First mark dropped: what it is, and the second mark to drop next. */
+.btn.mark.next { background: var(--accent); color: var(--accent-text); }
+.mark-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 14px; }
+.mark-pending[hidden] { display: none; }
+.mark-pending span { flex: 1 1 200px; }
 
 /* Combine / full-screen / refresh icons sit at the top right of the charts. */
 .charts-wrap { position: relative; }
@@ -317,4 +322,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=61"); }
+  background-image: url("../icons/mapbox-logo.svg?v=62"); }

@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=61">
+  <link rel="stylesheet" href="css/app.css?v=62">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=61"></script>
+  <script type="module" src="js/app.js?v=62"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -172,6 +172,11 @@
         </div>
       </div>
       <div id="status" class="status" role="status"></div>
+      <div id="mark-pending" class="mark-pending" hidden>
+        <span id="mark-pending-text"></span>
+        <button type="button" id="mark-keep" class="btn small"></button>
+        <button type="button" id="mark-cancel" class="btn small">Cancel</button>
+      </div>
       <div class="charts-wrap">
         <div class="chart-tools">
           <button type="button" id="btn-chart-mode" class="btn icon" aria-pressed="false" title="Combine charts" aria-label="Combine charts" hidden>
@@ -185,6 +190,7 @@
           </button>
         </div>
         <div id="mark-guide" class="mark-guide" hidden><span></span></div>
+        <div id="mark-line" class="mark-guide" hidden><span></span></div>
         <div id="charts"></div>
       </div>
       <div id="rangebar" class="rangebar" hidden aria-label="Visible time window: drag to move, long-press an edge or use two fingers to resize"></div>
