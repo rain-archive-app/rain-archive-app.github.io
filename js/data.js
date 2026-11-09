@@ -1,5 +1,5 @@
 // Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=59';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=61';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -164,10 +164,109 @@ export async function searchPlaces(name, signal) {
   }));
 }
 
-// Name + time zone + elevation for an arbitrary point (GPS or map tap).
-export async function resolvePoint(lat, lon) {
-  const tzReq = getJSON(`${FORECAST}?latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=1&hourly=temperature_2m`);
-  const nameReq = fetch(`${REVERSE}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=12&accept-language=en`)
+// ---------- Coordinates typed in the search box ----------
+
+const COORD_WORDS = {
+  LAT: '', LATITUDE: '', LON: '', LNG: '', LONG: '', LONGITUDE: '', DEG: '°',
+  NORTH: 'N', NORD: 'N', SOUTH: 'S', SUD: 'S', EAST: 'E', EST: 'E', WEST: 'W', OUEST: 'W', O: 'W',
+};
+const COORD_TOKENS = /[NSEW]|[-+]?\d+(?:\.\d+)?|[°'",;/|]/g;
+const isCoordNum = (t) => /\d/.test(t);
+const isCoordSep = (t) => /[,;/|]/.test(t);
+
+function validCoords(lat, lon) {
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+}
+
+// Links from Google Maps, OpenStreetMap, geo: URIs…
+function coordsFromLink(text) {
+  if (!/^(https?:|geo:|www\.)/i.test(text)) return null;
+  const s = decodeURIComponent(text.replace(/%(?![0-9a-f]{2})/gi, '%25'));
+  const n = '(-?\\d+(?:\\.\\d+)?)';
+  const patterns = [
+    `!3d${n}!4d${n}`, `geo:${n},${n}`, `[?&](?:q|ll|query|center|destination)=(?:loc:)?${n},\\s*${n}`,
+    `[?&]m?lat=${n}&m?(?:lon|lng)=${n}`, `#map=[\\d.]+/${n}/${n}`, `@${n},${n}`,
+  ];
+  for (const p of patterns) {
+    const m = s.match(new RegExp(p, 'i'));
+    if (m) return validCoords(+m[1], +m[2]);
+  }
+  return null;
+}
+
+// Swiss grid, LV95 (2600000 1200000) or LV03 (600000 200000), with swisstopo's approximate formulas.
+function coordsFromSwissGrid(text) {
+  const s = text.replace(/(\d)['’\s](?=\d{3}(?!\d))/g, '$1');
+  const nums = s.match(/\d{6,7}(?:\.\d+)?/g);
+  if (nums?.length !== 2 || s.replace(/\d{6,7}(?:\.\d+)?/g, '').replace(/[ENXY:=,;/\s]/gi, '')) return null;
+  const [a, b] = nums.map(Number);
+  const grid = (e, n) => (e >= 2.48e6 && e <= 2.84e6 && n >= 1.07e6 && n <= 1.3e6 ? [e, n]
+    : e >= 4.8e5 && e <= 8.5e5 && n >= 7e4 && n <= 3e5 ? [e + 2e6, n + 1e6] : null);
+  const en = grid(a, b) || grid(b, a);
+  if (!en) return null;
+  const y = (en[0] - 2.6e6) / 1e6, x = (en[1] - 1.2e6) / 1e6;
+  return {
+    lat: (16.9023892 + 3.238272 * x - 0.270978 * y * y - 0.002528 * x * x - 0.0447 * y * y * x - 0.014 * x * x * x) * 100 / 36,
+    lon: (2.6779094 + 4.728982 * y + 0.791484 * y * x + 0.1306 * y * x * x - 0.0436 * y * y * y) * 100 / 36,
+  };
+}
+
+// Decimal degrees, degrees-minutes or degrees-minutes-seconds, with signs or N/S/E/W(O) letters
+// before or after the numbers, in either order: { lat, lon }, or null if the text is not coordinates.
+export function parseCoords(text) {
+  const raw = text.trim();
+  const link = coordsFromLink(raw);
+  if (link) return link;
+
+  let s = raw.toUpperCase()
+    .replace(/[º˚]/g, '°').replace(/[′’‘`´]/g, "'").replace(/[″”“]|''/g, '"').replace(/−/g, '-')
+    .replace(/[A-Z]+/g, (w) => COORD_WORDS[w] ?? w).replace(/[:=]/g, ' ');
+  if (!s.includes('.')) {
+    // Decimal commas: "46,2 6,1" and "46,2,6,1" but not "46,6".
+    const four = s.match(/^\s*(\d+),(\d+),(\d+),(\d+)\s*$/);
+    const dec = four ? `${four[1]}.${four[2]} ${four[3]}.${four[4]}` : s.replace(/(\d),(\d)/g, '$1.$2');
+    if (dec.match(COORD_TOKENS)?.filter(isCoordNum).length >= 2) s = dec;
+  }
+  const tokens = s.match(COORD_TOKENS);
+  if (!tokens || s.replace(COORD_TOKENS, '').trim()) return coordsFromSwissGrid(raw);
+
+  // Find where the second coordinate starts.
+  const at = (test) => tokens.flatMap((t, i) => (test(t) ? [i] : []));
+  const letters = at((t) => /[NSEW]/.test(t));
+  const seps = at(isCoordSep);
+  const degs = at((t) => t === '°');
+  const nums = at(isCoordNum);
+  let cut;
+  if (letters.length === 2) cut = letters[0] === 0 ? letters[1] : letters[0] + 1;
+  else if (letters.length) return null;
+  else if (seps.length === 1) cut = seps[0];
+  else if (seps.length) return null;
+  else if (degs.length === 2) cut = nums.filter((i) => i < degs[1]).pop();
+  else if ([2, 4, 6].includes(nums.length)) cut = nums[nums.length / 2];
+  else return null;
+
+  const side = (part) => {
+    const [d, m = 0, sec = 0, extra] = part.filter(isCoordNum).map(Number);
+    if (d == null || extra != null || m >= 60 || sec >= 60) return null;
+    const sign = part.some((t) => t === 'S' || t === 'W' || t.startsWith('-')) ? -1 : 1;
+    return { value: sign * (Math.abs(d) + m / 60 + sec / 3600), letter: part.find((t) => /[NSEW]/.test(t)) };
+  };
+  const a = side(tokens.slice(0, cut));
+  const b = side(tokens.slice(cut));
+  if (!a || !b) return coordsFromSwissGrid(raw);
+  if (a.letter) {
+    const aIsLat = /[NS]/.test(a.letter);
+    if (aIsLat === /[NS]/.test(b.letter)) return null;
+    return (aIsLat ? validCoords(a.value, b.value) : validCoords(b.value, a.value)) || coordsFromSwissGrid(raw);
+  }
+  // No letters: latitude first, unless the first number can only be a longitude.
+  return (Math.abs(a.value) > 90 ? validCoords(b.value, a.value) : validCoords(a.value, b.value)) || coordsFromSwissGrid(raw);
+}
+
+// Name + time zone + elevation for an arbitrary point (GPS, map tap or typed coordinates).
+export async function resolvePoint(lat, lon, signal) {
+  const tzReq = getJSON(`${FORECAST}?latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=1&hourly=temperature_2m`, signal);
+  const nameReq = fetch(`${REVERSE}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=12&accept-language=en`, { signal })
     .then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const [meta, rev] = await Promise.all([tzReq, nameReq]);
   const a = rev?.address || {};

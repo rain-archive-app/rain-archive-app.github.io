@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=59';
+} from './vars.js?v=61';
 import {
-  HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, resolvePoint, getElevation, fetchHourly, aggregate,
+  HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=59';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=59';
-import { createRangeBar } from './rangebar.js?v=59';
+} from './data.js?v=61';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=61';
+import { createRangeBar } from './rangebar.js?v=61';
 
 const $ = (id) => document.getElementById(id);
 
@@ -402,7 +402,9 @@ async function runSearch(q) {
   searchAbort?.abort();
   searchAbort = new AbortController();
   try {
-    const list = await searchPlaces(q, searchAbort.signal);
+    // Typed coordinates: offer the point itself, under the name of the nearest place.
+    const point = parseCoords(q);
+    const list = point ? [await resolvePoint(point.lat, point.lon, searchAbort.signal)] : await searchPlaces(q, searchAbort.signal);
     results.innerHTML = '';
     if (!list.length) results.innerHTML = '<li class="muted small" style="padding:8px">No place found.</li>';
     for (const p of list) {
@@ -411,7 +413,7 @@ async function runSearch(q) {
       b.type = 'button';
       b.innerHTML = '<span></span><span class="sub"></span>';
       b.firstChild.textContent = p.name;
-      b.lastChild.textContent = [p.region, p.elevation != null ? `${Math.round(p.elevation)} m` : ''].filter(Boolean).join(' · ');
+      b.lastChild.textContent = [point ? `${p.lat}, ${p.lon}` : '', p.region, p.elevation != null ? `${Math.round(p.elevation)} m` : ''].filter(Boolean).join(' · ');
       b.onclick = () => { results.hidden = true; $('search').value = ''; setLocation(p); };
       b.className = 'res-main';
       b.onkeydown = (e) => {
@@ -537,15 +539,33 @@ function openMap(opts = {}) {
     logo.onAdd = () => L.DomUtil.create('div', 'mapbox-logo-wrap');
     logo.addTo(map);
     logo.getContainer().innerHTML = '<a class="mapbox-logo" href="https://www.mapbox.com/" target="_blank" rel="noopener" aria-label="Mapbox"></a>';
+    topo.on('add', () => logo.addTo(map));
     topo.on('remove', () => logo.remove());
+    // Other base maps, picked with the layers button (top right). Each one is enlarged past its
+    // last real zoom level (maxNativeZoom) instead of showing blank tiles.
+    const osmAttr = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+    const otm = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, maxNativeZoom: 17, subdomains: 'abc',
+      attribution: `${osmAttr}, SRTM · style © <a href="https://opentopomap.org/">OpenTopoMap</a> (CC BY-SA)`,
+    });
+    const bases = {
+      'Mapbox topo': topo,
+      OpenTopoMap: otm,
+      OpenStreetMap: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
+      'Satellite (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' }),
+      'Switzerland · swisstopo': L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg', {
+        maxZoom: 19, attribution: '© swisstopo' }),
+      'France · IGN': L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png', {
+        maxZoom: 19, attribution: '© IGN' }),
+    };
+    const layers = L.control.layers(bases, null, { position: 'topright' }).addTo(map);
+    map.on('baselayerchange', () => layers.collapse());
     let tileErrors = 0;
     topo.on('tileerror', () => {
       if (++tileErrors < 4 || !map.hasLayer(topo)) return;
       map.removeLayer(topo);
-      L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        maxZoom: 17, subdomains: 'abc',
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM · style © <a href="https://opentopomap.org/">OpenTopoMap</a> (CC BY-SA)',
-      }).addTo(map);
+      otm.addTo(map);
     });
     favLayer = L.layerGroup().addTo(map);
     map.on('click', (e) => { const p = e.latlng.wrap(); pickPoint(p.lat, p.lng); });
