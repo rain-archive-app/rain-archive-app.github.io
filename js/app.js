@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=63';
+} from './vars.js?v=80';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=63';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=63';
-import { createRangeBar } from './rangebar.js?v=63';
+} from './data.js?v=80';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=80';
+import { createRangeBar } from './rangebar.js?v=80';
 
 const $ = (id) => document.getElementById(id);
 
@@ -104,6 +104,7 @@ const lastHour = () => nowHour() + FORECAST_DAYS * 86400; // the end of the fore
 
 const tabs = [...document.querySelectorAll('.tab')];
 function openPanel(id) {
+  if (!$('card-period').hidden && id !== 'card-period') restorePeriod(); // left without confirming
   document.documentElement.style.setProperty('--header-h', `${Math.round($('topbar').getBoundingClientRect().bottom)}px`);
   for (const t of tabs) {
     const on = t.dataset.panel === id;
@@ -650,6 +651,7 @@ function renderPeriodSummary() {
   updateTabs();
   const w = computeWindow();
   const el = $('period-summary');
+  $('period-fit-view').disabled = $('period-fit-total').disabled = !!w.error;
   if (w.error) { el.textContent = w.error; return; }
   const z = tz();
   el.textContent = `${fmtWall(wallMs(w.S, z))} → ${fmtWall(wallMs(w.E, z))} · ${fmtDuration(Math.round((w.E - w.S) / HOUR))} · ${z}` +
@@ -678,7 +680,21 @@ function prefillOther() {
   if (!state.rangeStart) state.rangeStart = unixToZonedInput(now - 7 * 86400, tz());
 }
 
-function onPeriodChange() { save(); syncPeriodUI(); scheduleFetch(); }
+// The panel's settings only count once confirmed; leaving it without confirming brings back the
+// period in use.
+let appliedPeriod = null;
+const periodFields = () => {
+  const { otherMode, endNow, end, qty, qtyUnit, rangeStart, rangeEnd } = state;
+  return { otherMode, endNow, end, qty, qtyUnit, rangeStart, rangeEnd };
+};
+function restorePeriod() {
+  if (!appliedPeriod) return;
+  Object.assign(state, appliedPeriod);
+  save();
+  syncPeriodUI();
+}
+
+function onPeriodChange() { save(); syncPeriodUI(); }
 
 $('end-now').onchange = (e) => { state.endNow = e.target.checked; onPeriodChange(); };
 // Switching between "end + duration" and "date range" keeps the same period.
@@ -704,10 +720,28 @@ document.querySelectorAll('input[name="other-mode"]').forEach((r) => {
   r.onchange = () => { convertOtherMode(r.value); state.otherMode = r.value; onPeriodChange(); };
 });
 $('end').onchange = (e) => { state.end = e.target.value; onPeriodChange(); };
-$('qty').oninput = (e) => { state.qty = e.target.value; save(); renderPeriodSummary(); scheduleFetch(900); };
+$('qty').oninput = (e) => { state.qty = e.target.value; save(); renderPeriodSummary(); };
 $('qty-unit').onchange = (e) => { state.qtyUnit = e.target.value; onPeriodChange(); };
 $('range-start').onchange = (e) => { state.rangeStart = e.target.value; onPeriodChange(); };
 $('range-end').onchange = (e) => { state.rangeEnd = e.target.value; onPeriodChange(); };
+
+// "Fit totals and view": these dates become the period, over which the running totals then stay.
+function fitTotalsAndView() {
+  totalsFixed = true;
+  clearPendingMark();
+  appliedPeriod = periodFields();
+  openPanel(null);
+  scheduleFetch(0);
+}
+$('period-fit-total').onclick = () => { if (!computeWindow().error) fitTotalsAndView(); };
+// "Fit view": the chart shows these dates; the period and its totals stay as they were.
+$('period-fit-view').onclick = () => {
+  const w = computeWindow();
+  if (w.error) return;
+  if (!raw || !zoomWin) { fitTotalsAndView(); return; } // nothing on screen yet to keep
+  openPanel(null);
+  showWindow({ startMs: wallMs(w.S, raw.tz), endMs: wallMs(w.E, raw.tz) });
+};
 
 // ---------- Variables ----------
 
@@ -838,7 +872,8 @@ function renderModels() {
 
 let period = null;
 let axis = null;
-let pendingMark = null; // first period mark dropped, waiting for the second: { which, t }
+let pendingMarks = {}; // period marks waiting on the chart until they are applied: { start, end } (wall ms)
+let totalsFixed = false; // the running totals stay on the period, whatever the view (else they follow the view)
 
 function setStatus(msg, kind = '') {
   const el = $('status');
@@ -868,6 +903,7 @@ async function doFetch() {
   if (!state.loc) { setStatus('Search a place, use your position or pick one on the map to start.'); return; }
   const w = computeWindow();
   if (w.error) { setStatus(w.error, 'error'); clearResults(); return; }
+  appliedPeriod = periodFields();
   if (!state.vars.length) {
     // Nothing to download: keep an empty chart over the period, with a message.
     fetchAbort?.abort();
@@ -1060,7 +1096,9 @@ function trimRaw() {
   const len = axis.E - axis.S;
   if (raw.loadedE - raw.loadedS <= 4 * len) return;
   const wb = wholeBars(axis); // never cut into a bar that is on screen
-  const S = Math.max(raw.loadedS, Math.min(wb.S, axis.S - len)), E = Math.min(raw.loadedE, Math.max(wb.E, axis.E + len));
+  // A fixed period stays loaded whole: the running totals are computed over it, whatever the view.
+  const S = Math.max(raw.loadedS, Math.min(wb.S, axis.S - len, totalsFixed ? rawWindow.S : Infinity));
+  const E = Math.min(raw.loadedE, Math.max(wb.E, axis.E + len, totalsFixed ? rawWindow.E : -Infinity));
   const idx = [];
   raw.times.forEach((t, i) => { if (t > S && t <= E) idx.push(i); });
   raw = { ...raw, times: idx.map((i) => raw.times[i]),
@@ -1120,6 +1158,7 @@ function onChartZoom(z) {
   zoomWin = { startMs: z.startMs, endMs: z.endMs };
   rangeBar.update({ start: z.startMs, end: z.endMs });
   placePendingLine();
+  closeMarkMenu();
   const own = snapped && Math.abs(z.startMs - snapped.startMs) < 1e3 && Math.abs(z.endMs - snapped.endMs) < 1e3;
   if (own) return; // relayout is already running
   snapped = null;
@@ -1167,8 +1206,7 @@ function watchSlow(what, cancel) {
 
 // ---------- View buttons ----------
 // Period: the saved period. Up to now: the current visible length, ending now (the saved period is
-// not changed). Forecast: from yesterday to the end of the forecast (period not changed either).
-// 1 d…1 y: that length, ending where the chart currently ends.
+// not changed). 1 d…1 y: that length, ending where the chart currently ends.
 
 let activeView = null;
 let lastX = [], lastStart = [], lastEnd = []; // bars of the last render: middle, start, end (wall ms)
@@ -1199,9 +1237,6 @@ function viewWindow(view, spanSec, anchorMs) {
   } else if (view === 'now') {
     i1 = lastBarBefore(wallMs(nowHour(), raw.tz));
     i0 = Math.max(0, i1 - Math.max(1, Math.round((spanSec * 1000) / STEP_MS[state.agg])) + 1);
-  } else if (view === 'forecast') {
-    i0 = firstBarAfter(wallMs(nowHour() - 86400, raw.tz));
-    i1 = lastBarBefore(wallMs(lastHour(), raw.tz));
   } else {
     i1 = lastBarBefore(anchorMs);
     i0 = Math.max(0, i1 - viewBuckets(view) + 1);
@@ -1218,8 +1253,7 @@ async function applyView(view) {
   else if (view === 'now') {
     spanSec = zoomWin ? (zoomWin.endMs - zoomWin.startMs) / 1000 : rawWindow.E - rawWindow.S;
     E = nowHour(); S = E - spanSec;
-  } else if (view === 'forecast') { S = nowHour() - 86400; E = lastHour(); }
-  else {
+  } else {
     E = unwall(anchorMs) + stepSec;
     S = E - (viewBuckets(view) + 1) * stepSec;
   }
@@ -1243,12 +1277,16 @@ document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
 // the saved period then runs between them. The drop point snaps to an hour, or to a bar boundary when
 // the data are aggregated per day, week, month or year. A dashed line shows where it will land.
 
-const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function markLabel(ms) {
   const d = new Date(ms);
-  const date = `${WD3[d.getUTCDay()]} ${d.getUTCDate()} ${MO3[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-  return state.agg === 'hour' ? `${date} ${String(d.getUTCHours()).padStart(2, '0')}:00` : date;
+  const two = (n) => String(n).padStart(2, '0');
+  return `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+}
+
+// Time between two marks, in days and hours.
+function markDuration(ms) {
+  const h = Math.round(ms / 3600e3), days = Math.floor(h / 24), rest = h % 24;
+  return [days ? `${days} d` : '', rest || !days ? `${rest} h` : ''].filter(Boolean).join(' ');
 }
 
 function snapMark(ms) {
@@ -1288,63 +1326,217 @@ function showGuide(which, hit) {
   guide.hidden = false;
 }
 
-// A first dropped mark only waits on the chart, so that nothing moves while the second one is placed
-// (zooming and panning stay free). Dropping the other mark applies both; "Keep current…" applies the first alone.
+// Dropped marks only wait on the chart, so that nothing moves while they are placed and adjusted
+// (zooming and panning stay free). "Apply" uses both; with one mark, "Keep current…" applies it alone.
 const otherMark = (which) => (which === 'start' ? 'end' : 'start');
+let marksDrawn = 'undefined|undefined', marksFrame = 0;
 
 function showPendingMark() {
-  $('mark-pending').hidden = !pendingMark;
+  const { start, end } = pendingMarks;
+  const both = start != null && end != null;
+  $('mark-pending').hidden = start == null && end == null;
   document.querySelectorAll('#view-btns button[data-mark]').forEach((b) => {
-    b.classList.toggle('next', !!pendingMark && b.dataset.mark === otherMark(pendingMark.which));
+    const placed = pendingMarks[b.dataset.mark] != null;
+    b.classList.toggle('next', !$('mark-pending').hidden && !placed);
+    b.title = placed
+      ? 'Click to cancel this mark, or drag it to move it'
+      : `Drag onto the chart to set the ${b.dataset.mark} of the period`;
   });
-  if (pendingMark) {
-    const other = otherMark(pendingMark.which);
-    $('mark-pending-text').textContent = `Period ${pendingMark.which}: ${markLabel(pendingMark.t)}. Now drop the ${other} mark.`;
+  if (both) {
+    $('mark-pending-text').textContent = `Period: ${markLabel(start)} → ${markLabel(end)} (${markDuration(end - start)}).`;
+    $('mark-keep').textContent = 'Apply';
+  } else if (!$('mark-pending').hidden) {
+    const which = start != null ? 'start' : 'end', other = otherMark(which);
+    $('mark-pending-text').textContent = `Period ${which}: ${markLabel(pendingMarks[which])}. Now drop the ${other} mark.`;
     $('mark-keep').textContent = `Keep current ${other}`;
   }
+  $('mark-keep').classList.toggle('primary', both);
   placePendingLine();
+  // The running totals follow the marks at once, redrawn at most once per frame.
+  const key = `${start}|${end}`;
+  if (key !== marksDrawn) {
+    marksDrawn = key;
+    cancelAnimationFrame(marksFrame);
+    marksFrame = requestAnimationFrame(() => renderResults());
+  }
 }
 
-// The waiting mark's line, kept in place as the chart zooms and pans.
-function placePendingLine() {
-  const line = $('mark-line');
-  const chartEl = pendingMark && $('charts').querySelector('.chart');
+// Where the chart's time axis lies in the marks' container (the charts-wrap element).
+function markView() {
+  const chartEl = $('charts').querySelector('.chart');
   const grid = chartEl && echarts.getInstanceByDom(chartEl)?.getModel()?.getComponent('grid')?.coordinateSystem?.getRect();
-  const s = zoomWin ? zoomWin.startMs : chartRange.min, e = zoomWin ? zoomWin.endMs : chartRange.max;
-  const f = grid ? (pendingMark.t - s) / (e - s) : -1;
-  if (f < 0 || f > 1) { line.hidden = true; return; }
-  const wrap = line.parentElement.getBoundingClientRect();
-  line.style.left = `${chartEl.getBoundingClientRect().left - wrap.left + grid.x + f * grid.width}px`;
-  line.classList.toggle('end', pendingMark.which === 'end');
-  line.firstChild.textContent = markLabel(pendingMark.t);
-  line.hidden = false;
+  if (!grid) return null;
+  const wrap = $('mark-link').parentElement.getBoundingClientRect();
+  return {
+    s: zoomWin ? zoomWin.startMs : chartRange.min, e: zoomWin ? zoomWin.endMs : chartRange.max,
+    left: chartEl.getBoundingClientRect().left - wrap.left + grid.x, width: grid.width, wrap,
+  };
 }
+
+// The waiting marks' lines and the line joining them, kept in place as the chart zooms and pans.
+// The handles sit halfway down the part of the charts that is on screen.
+function placePendingLine() {
+  const v = markView();
+  const link = $('mark-link');
+  const xOf = (t) => v.left + ((t - v.s) / (v.e - v.s)) * v.width;
+  const y = v ? (Math.max(v.wrap.top, 0) + Math.min(v.wrap.bottom, innerHeight)) / 2 - v.wrap.top : 0;
+  for (const which of ['start', 'end']) {
+    const line = $(`mark-line-${which}`), t = pendingMarks[which];
+    line.hidden = !v || t == null || t < v.s || t > v.e;
+    if (line.hidden) continue;
+    line.style.left = `${xOf(t)}px`;
+    line.firstChild.textContent = markLabel(t);
+    line.querySelector('.mark-handle').style.top = `${y}px`;
+  }
+  const { start, end } = pendingMarks;
+  const both = v && start != null && end != null;
+  const x1 = both ? Math.max(v.left, xOf(start)) : 0, x2 = both ? Math.min(v.left + v.width, xOf(end)) : 0;
+  link.hidden = x2 <= x1;
+  if (link.hidden) { $('mark-line-end').classList.remove('low'); return; }
+  link.style.left = `${x1}px`;
+  link.style.width = `${x2 - x1}px`;
+  link.style.top = `${y}px`;
+  link.firstElementChild.textContent = markDuration(end - start);
+  link.classList.toggle('narrow', x2 - x1 < 64);
+  $('mark-line-end').classList.toggle('low', x2 - x1 < 220);
+}
+addEventListener('scroll', () => { if (!$('mark-pending').hidden) placePendingLine(); }, true);
 
 function clearPendingMark() {
-  pendingMark = null;
+  pendingMarks = {};
   showPendingMark();
 }
 
 function dropMark(which, t) {
-  if (!pendingMark || pendingMark.which === which) {
-    pendingMark = { which, t };
-    showPendingMark();
-    return;
-  }
-  if (t === pendingMark.t) {
+  if (pendingMarks[otherMark(which)] === t) {
     setStatus('Both marks fall on the same time: drop this one elsewhere.', 'error');
     return;
   }
-  applyMarks({ [pendingMark.which]: pendingMark.t, [which]: t });
+  pendingMarks[which] = t;
+  const { start, end } = pendingMarks;
+  if (start > end) pendingMarks = { start: end, end: start }; // the wrong way round: the earlier one is the start
+  setStatus('');
+  showPendingMark();
 }
 
-$('mark-keep').onclick = () => { if (pendingMark) applyMarks({ [pendingMark.which]: pendingMark.t }); };
+$('mark-keep').onclick = () => applyMarks(pendingMarks);
 $('mark-cancel').onclick = clearPendingMark;
+
+// A handle follows the pointer horizontally; move(x, x0, marks) gets the pointer's position and
+// where it and the marks were when the drag began.
+function dragHandle(el, move) {
+  let drag = null;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    drag = { id: e.pointerId, x0: e.clientX, marks: { ...pendingMarks } };
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (drag?.id === e.pointerId) move(e.clientX, drag.x0, drag.marks);
+  });
+  const end = (e) => { if (drag?.id === e.pointerId) drag = null; };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+// One mark: stays on the visible axis, on its own side of the other mark.
+for (const which of ['start', 'end']) {
+  dragHandle($(`mark-line-${which}`).querySelector('.mark-handle'), (x) => {
+    const v = markView();
+    if (!v) return;
+    const f = Math.min(1, Math.max(0, (x - v.wrap.left - v.left) / v.width));
+    const t = snapMark(v.s + f * (v.e - v.s));
+    const other = pendingMarks[otherMark(which)];
+    if (other != null && (which === 'start' ? t >= other : t <= other)) return;
+    pendingMarks[which] = t;
+    showPendingMark();
+  });
+}
+
+// Both marks: their middle stays on the visible axis, and they stay within the chart's time range.
+dragHandle($('mark-link').querySelector('.mark-handle'), (x, x0, { start, end }) => {
+  const v = markView();
+  if (!v) return;
+  const mid = (start + end) / 2;
+  const lo = Math.max(chartRange.min - start, v.s - mid), hi = Math.min(chartRange.max - end, v.e - mid);
+  const dt = Math.min(hi, Math.max(lo, ((x - x0) / v.width) * (v.e - v.s)));
+  const a = snapMark(start + dt), b = snapMark(end + dt);
+  if (a >= b) return;
+  pendingMarks = { start: a, end: b };
+  showPendingMark();
+});
+
+// Long press or right click on a chart: a small menu to put a mark at that time.
+const markMenu = $('mark-menu');
+let markMenuTime = null, press = null;
+
+function closeMarkMenu() {
+  if (markMenu.hidden) return;
+  markMenu.hidden = true;
+  $('mark-guide').hidden = true;
+}
+
+function openMarkMenu(x, y, hit) {
+  clearTimeout(press?.timer);
+  press = null;
+  hit.snapped = snapMark(hit.t);
+  markMenuTime = hit.snapped;
+  hit.chart.dispatchAction({ type: 'hideTip' });
+  $('mark-menu-time').textContent = markLabel(hit.snapped);
+  markMenu.querySelectorAll('button[data-menu-mark]').forEach((b) => {
+    const which = b.dataset.menuMark;
+    if (which) b.textContent = pendingMarks[which] != null ? `Move period ${which} here` : `Set as period ${which}`;
+  });
+  markMenu.hidden = false;
+  showGuide('start', hit);
+  // Above the finger when there is room, so that it stays visible.
+  const { width, height } = markMenu.getBoundingClientRect();
+  markMenu.style.left = `${Math.max(8, Math.min(innerWidth - width - 8, x - width / 2))}px`;
+  markMenu.style.top = `${y - height - 12 >= 8 ? y - height - 12 : Math.min(innerHeight - height - 8, y + 12)}px`;
+}
+
+markMenu.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  closeMarkMenu();
+  if (b.dataset.menuMark) dropMark(b.dataset.menuMark, markMenuTime);
+});
+
+$('charts').addEventListener('pointerdown', (e) => {
+  clearTimeout(press?.timer);
+  press = null;
+  if (e.button > 0 || !raw || e.isPrimary === false) return;
+  const { clientX: x, clientY: y, pointerId: id } = e;
+  press = { id, x, y, timer: setTimeout(() => {
+    const hit = timeAtPoint(x, y);
+    press = null;
+    if (hit?.chart) openMarkMenu(x, y, hit);
+  }, LONG_PRESS_MS) };
+}, true);
+addEventListener('pointermove', (e) => {
+  if (press?.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) { clearTimeout(press.timer); press = null; }
+}, true);
+for (const type of ['pointerup', 'pointercancel']) {
+  addEventListener(type, (e) => { if (press?.id === e.pointerId) { clearTimeout(press.timer); press = null; } }, true);
+}
+$('charts').addEventListener('contextmenu', (e) => {
+  if (!raw) return;
+  const hit = timeAtPoint(e.clientX, e.clientY);
+  if (!hit?.chart) return;
+  e.preventDefault();
+  if (markMenu.hidden) openMarkMenu(e.clientX, e.clientY, hit); // Android: the long press itself may have opened it
+});
+addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) closeMarkMenu(); }, true);
+for (const type of ['wheel', 'scroll', 'resize']) addEventListener(type, closeMarkMenu, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMarkMenu(); });
 
 // Dropped marks become the start and/or end of the saved period: the Period panel switches to
 // "Date range" with those bounds, a bound without mark is kept, and the data are reloaded.
 function applyMarks({ start, end }) {
   clearPendingMark();
+  totalsFixed = true;
   setStatus('');
   const z = raw.tz;
   let S = rawWindow.S, E = rawWindow.E;
@@ -1401,7 +1593,12 @@ document.querySelectorAll('#view-btns button[data-mark]').forEach((btn) => {
     ghost.hidden = true;
     $('mark-guide').hidden = true;
     if (moved && hit && e.type === 'pointerup') dropMark(which, hit.snapped);
-    if (!moved) {
+    if (!moved && e.type === 'pointerup' && pendingMarks[which] != null) {
+      delete pendingMarks[which]; // clicking a mark that waits on the chart takes it back
+      showPendingMark();
+      clearTimeout(markHintTimer);
+      setStatus('');
+    } else if (!moved) {
       setStatus(`Drag this mark onto the chart to set the ${which} of the period.`);
       clearTimeout(markHintTimer);
       markHintTimer = setTimeout(() => setStatus(''), 3000);
@@ -1476,26 +1673,26 @@ function clearResults() {
 
 function fmt(v, unit) { return v == null ? '–' : v.toFixed(decimals(unit)); }
 
-// First and last bar whose middle lies inside the view. When the view is narrower than one bar (no
-// middle on screen), the bar under the middle of the view. null when there are no bars at all.
-function visibleBars(agg) {
-  const s0 = zoomWin ? zoomWin.startMs : -Infinity, e0 = zoomWin ? zoomWin.endMs : Infinity;
+// First and last bar whose middle lies between s0 and e0. When that is narrower than one bar (no
+// middle inside), the bar under its middle. null when there are no bars at all.
+function barsBetween(agg, s0, e0) {
   let i0 = -1, i1 = -1;
   agg.x.forEach((x, i) => { if (x >= s0 && x <= e0) { if (i0 < 0) i0 = i; i1 = i; } });
-  if (i0 < 0 && zoomWin) {
+  if (i0 < 0 && Number.isFinite(s0)) {
     const mid = (s0 + e0) / 2;
     i0 = i1 = agg.start.findIndex((b, i) => b <= mid && agg.end[i] > mid);
   }
   return i0 < 0 ? null : { i0, i1 };
 }
+const visibleBars = (agg) => barsBetween(agg, zoomWin ? zoomWin.startMs : -Infinity, zoomWin ? zoomWin.endMs : Infinity);
 
-// Running totals: nothing before the first bar on screen, then the sum from there on.
-function restartRunningTotals(agg, vis) {
+// Running totals: nothing before bar vis.i0 and after bar last, the sum in between.
+function restartRunningTotals(agg, vis, last = Infinity) {
   for (const s of Object.values(agg.series)) {
     if (!s.cum) continue;
     let run = 0;
     s.cum = s.val.map((v, i) => {
-      if (!vis || i < vis.i0) return null;
+      if (!vis || i < vis.i0 || i > last) return null;
       if (v != null) run += v;
       return run;
     });
@@ -1535,17 +1732,36 @@ function renderResults() {
   const agg = aggregate(raw, keys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;
   // The bars "on screen" are those whose middle is inside the view: the running total starts at the
-  // first of them and its value is written at the last.
+  // first of them and its value is written at the last. With a date range or marks waiting on the
+  // chart, it runs between those instead, whatever the view: the same value is written where its
+  // line leaves the screen. A single mark goes with the period's other bound, as when it is applied.
   const vis = visibleBars(agg);
-  restartRunningTotals(agg, vis);
-  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, vis ? vis.i0 : 0);
+  const { start: markS, end: markE } = pendingMarks;
+  let dates = totalsFixed ? barsBetween(agg, wallMs(rawWindow.S, raw.tz), wallMs(rawWindow.E, raw.tz)) : null;
+  if (markS != null || markE != null) {
+    const s = markS ?? wallMs(rawWindow.S, raw.tz), e = markE ?? wallMs(rawWindow.E, raw.tz);
+    dates = s < e ? barsBetween(agg, s, e) : markS != null ? barsBetween(agg, s, Infinity) : barsBetween(agg, -Infinity, e);
+  }
+  const from = dates ?? vis;
+  restartRunningTotals(agg, from, dates?.i1);
+  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, from ? from.i0 : 0);
+  let endIdx = vis ? vis.i1 : -1, totalIdx = endIdx;
+  if (dates) {
+    const seen = vis && vis.i0 <= dates.i1 && vis.i1 >= dates.i0;
+    totalIdx = seen ? dates.i1 : -1;
+    endIdx = seen ? Math.min(vis.i1, dates.i1) : -1;
+  }
+  document.querySelectorAll('#view-btns button[data-total]').forEach((b) => { b.disabled = !keys.some((k) => VAR_BY_KEY[k].kind === 'sum'); });
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
-    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1, nowMs: wallMs(nowHour(), raw.tz),
+    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the last bar's middle, kept on screen when that bar is wider than the view.
-      endX: vis && zoomWin ? Math.min(Math.max(agg.x[vis.i1], zoomWin.startMs), zoomWin.endMs) : undefined });
+      endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.x[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
+  const removable = state.vars.length > 1;
+  $('charts').classList.toggle('vars-removable', removable);
+  $('charts').querySelectorAll('.chart-title').forEach((t) => { t.title = removable ? 'Click to remove from the charts' : ''; });
   // Time bar: the axis range, the visible window, and the first variable's profile.
   $('rangebar').hidden = false;
   lastShadow = agg.x.map((x, i) => [x, agg.series[keys[0]].val[i]]);
@@ -1559,6 +1775,75 @@ function renderResults() {
 }
 
 $('btn-refresh').onclick = () => { syncPeriodUI(); scheduleFetch(0); };
+// Chart row of the toolbar: puts both marks where the running totals should run, to adjust and apply.
+// The view only changes when a mark would otherwise be off screen.
+async function placeMarks(start, end) {
+  pendingMarks = { start, end };
+  setStatus('');
+  const v = zoomWin;
+  if (start >= v.startMs && end <= v.endMs) { showPendingMark(); return; }
+  const margin = (end - start) * 0.05;
+  await showWindow({ startMs: Math.min(v.startMs, start - margin), endMs: Math.max(v.endMs, end + margin) });
+  showPendingMark();
+}
+
+// Moves the view to a time window (wall ms), loading what it needs.
+async function showWindow(win) {
+  const want = axisAround(unwall(win.startMs), unwall(win.endMs));
+  const need = wholeBars(want);
+  if (totalsFixed) { need.S = Math.min(need.S, rawWindow.S); need.E = Math.max(need.E, rawWindow.E); }
+  await queue(() => ensureData(need));
+  if (!raw) return;
+  axis = want;
+  trimRaw();
+  renderResults(); // the axis first, then the view on it
+  zoomWin = win;
+  renderResults();
+  setActiveView(null);
+}
+// The range of the totals (wall ms): the marks waiting on the chart, or else the period.
+function totalsRange() {
+  const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz);
+  const a = pendingMarks.start ?? S, z = pendingMarks.end ?? E;
+  return z > a ? [a, z] : [S, E];
+}
+// View row: same length of view, around the middle of that range, on a whole hour.
+$('btn-center-view').onclick = () => {
+  if (!raw || !zoomWin) return;
+  const [a, z] = totalsRange();
+  const span = zoomWin.endMs - zoomWin.startMs;
+  const start = Math.round(Math.min((a + z - span) / 2, wallMs(lastHour(), raw.tz) - span) / 3600e3) * 3600e3;
+  showWindow({ startMs: start, endMs: start + span });
+};
+document.querySelectorAll('#view-btns button[data-total]').forEach((b) => {
+  b.onclick = () => {
+    if (!raw || !zoomWin) return;
+    const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz), now = wallMs(nowHour(), raw.tz);
+    if (b.dataset.total === 'view') placeMarks(zoomWin.startMs, zoomWin.endMs);
+    else if (b.dataset.total === 'period') placeMarks(S, E);
+    else if (b.dataset.total === 'center') {
+      // Same length, around the middle of the view, without going past the end of the forecast.
+      const [a, z] = totalsRange();
+      const len = z - a;
+      const start = Math.min(snapMark((zoomWin.startMs + zoomWin.endMs - len) / 2), wallMs(lastHour(), raw.tz) - len);
+      placeMarks(start, snapMark(start + len));
+    } else {
+      // From the start already chosen up to now; a start in the future would leave nothing to add up.
+      const start = pendingMarks.start ?? S;
+      placeMarks(start < now ? start : now - (E - S), now);
+    }
+  };
+});
+// Clicking a variable's title removes it, unless it is the last one.
+$('charts').addEventListener('click', (e) => {
+  const key = e.target.closest('.chart-title')?.dataset.key;
+  if (!key || state.vars.length < 2) return;
+  state.vars = state.vars.filter((k) => k !== key);
+  save();
+  renderVars();
+  renderUnits();
+  renderResults();
+});
 $('btn-chart-mode').onclick = () => {
   state.chartMode = state.chartMode === 'stacked' ? 'combined' : 'stacked';
   save();

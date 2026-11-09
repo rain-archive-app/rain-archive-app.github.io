@@ -1,18 +1,27 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=63';
-import { fmtWall, STEP_MS } from './data.js?v=63';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=80';
+import { fmtWall, STEP_MS } from './data.js?v=80';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
 const DAY = 86400e3;
-const FC_OPACITY = 0.5; // forecast bars and dots, lighter than the past
 let instances = [];
 let current = null; // {sig, titleEls: {key: el}, gran}
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 const colorFor = (keys, k) => PALETTE[keys.indexOf(k) % PALETTE.length];
+
+// #rrggbb moved towards white (255) or black (0) by the fraction f.
+function mixColor(color, target, f) {
+  const n = parseInt(color.slice(1), 16);
+  const ch = (shift) => Math.round(((n >> shift) & 255) * (1 - f) + target * f);
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+const lighter = (color) => mixColor(color, 255, 0.45); // forecast bars, dots and bands
+// Running totals and mean lines. Less dark on a dark background, where they would disappear.
+const darker = (color, theme) => mixColor(color, 0, theme.dark ? 0.2 : 0.35);
 
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const PINCH_TOLERANCE = 0.15; // finger spacing may change ±15 % during a two-finger pan
@@ -221,6 +230,7 @@ function attachTouch(chart, el) {
 function titleEl(key, color) {
   const el = document.createElement('div');
   el.className = 'chart-title';
+  el.dataset.key = key;
   el.innerHTML = '<span class="dot"></span><span class="name"></span>';
   el.querySelector('.dot').style.background = color;
   el.querySelector('.name').textContent = VAR_BY_KEY[key].label;
@@ -329,8 +339,10 @@ function describe(key, s, i, gran) {
 
 // Series for one variable. axes = {main, cum} y-axis indices.
 // endIdx: last bar on screen; the running total shows its value there, in bold.
-function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = []) {
+// totalIdx: the bar whose running total is the value written (its end may be off screen).
+function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = [], totalIdx = endIdx) {
   const v = VAR_BY_KEY[key];
+  const light = lighter(color), dark = darker(color, theme);
   const pts = (arr) => x.map((t, i) => [t, arr[i]]);
   // The same values split between past and forecast. Forecast lines start at the last past point.
   const pastPts = (arr) => x.map((t, i) => [t, fc[i] ? null : arr[i]]);
@@ -353,19 +365,22 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
     // Stacked on each other (one of the two is always empty) so that they share one bar slot.
     const bars = { type: 'bar', yAxisIndex: axes.main, stack: `bars-${key}`, barMaxWidth: 40, barCategoryGap: '15%', large: many, largeThreshold: 2000 };
     out.push({ ...bars, name: v.label, data: pastPts(s.val), itemStyle: { color } });
-    out.push({ ...bars, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color, opacity: FC_OPACITY } });
-    band('likely', s.lo, s.hi, color, axes.main, 0.22, 'middle');
-    band('total range', s.cumLo, s.cumHi, theme.text, axes.cum, 0.1);
+    out.push({ ...bars, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color: light } });
+    band('likely', s.lo, s.hi, light, axes.main, 0.3, 'middle');
+    band('total range', s.cumLo, s.cumHi, dark, axes.cum, 0.12);
     const endVal = endIdx >= 0 ? s.cum[endIdx] : null;
-    const endLo = endIdx >= 0 ? s.cumLo[endIdx] : null;
+    const totalVal = s.cum[totalIdx], totalLo = s.cumLo[totalIdx];
     const d = decimals(s.unit);
-    const endText = endVal == null ? '' : `Total ${endVal.toFixed(d)}`
-      + (endLo != null ? ` (${endLo.toFixed(d)}–${s.cumHi[endIdx].toFixed(d)})` : '')
-      + (fc[endIdx] ? ' incl. forecast' : '');
-    out.push({ name: `${v.label} – running total`, type: 'line', yAxisIndex: axes.cum, data: pts(s.cum), showSymbol: false, ...fast,
-      lineStyle: { color: theme.text, width: 1.5, type: 'dashed', opacity: 0.8 }, itemStyle: { color: theme.text }, z: 3,
+    const endText = endVal == null ? '' : `Total ${totalVal.toFixed(d)}`
+      + (totalLo != null ? ` (${totalLo.toFixed(d)}–${s.cumHi[totalIdx].toFixed(d)})` : '')
+      + (fc[totalIdx] ? ' incl. forecast' : '');
+    const total = { type: 'line', yAxisIndex: axes.cum, showSymbol: false, ...fast, z: 3, itemStyle: { color: dark } };
+    out.push({ ...total, name: `${v.label} – running total forecast`, data: fcLinePts(s.cum),
+      lineStyle: { color: dark, width: 2, type: 'dotted' } });
+    out.push({ ...total, name: `${v.label} – running total`, data: pastPts(s.cum),
+      lineStyle: { color: dark, width: 1.5, type: 'dashed' },
       markPoint: endVal == null ? { data: [] } : {
-        symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: theme.text },
+        symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: dark },
         // "Total" and the number, in bold, right above the end of the line (no unit, no background).
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
         // (placeTotalLabels moves it below the point, on a background, when there is no room above)
@@ -377,17 +392,18 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
   } else if (v.kind === 'dir' || v.kind === 'code') {
     const dots = { type: 'scatter', yAxisIndex: axes.main, symbolSize: many ? 3 : 6, large: many, largeThreshold: 2000 };
     out.push({ ...dots, name: v.label, data: pastPts(s.val), itemStyle: { color } });
-    out.push({ ...dots, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color, opacity: FC_OPACITY } });
+    out.push({ ...dots, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color: light } });
   } else {
     if (gran !== 'hour') {
       // Lowest and highest of each bar; where the forecast has a likely range, that band replaces it.
-      const noBand = (arr) => arr.map((a, i) => (s.lo[i] == null ? a : null));
-      band('range', noBand(s.min), noBand(s.max), color, axes.main, 0.18);
+      const noBand = (arr, future) => arr.map((a, i) => (s.lo[i] == null && !!fc[i] === future ? a : null));
+      band('range', noBand(s.min, false), noBand(s.max, false), color, axes.main, 0.18);
+      band('forecast range', noBand(s.min, true), noBand(s.max, true), light, axes.main, 0.3);
     }
-    band('likely', s.lo, s.hi, color, axes.main, 0.25);
-    const line = { type: 'line', yAxisIndex: axes.main, showSymbol: x.length < 60, symbolSize: 4, ...fast, connectNulls: false, itemStyle: { color } };
-    out.push({ ...line, name: v.label, data: pastPts(s.val), lineStyle: { color, width: 2 } });
-    out.push({ ...line, name: `${v.label} forecast`, data: fcLinePts(s.val), lineStyle: { color, width: 2, type: 'dashed' } });
+    band('likely', s.lo, s.hi, light, axes.main, 0.4);
+    const line = { type: 'line', yAxisIndex: axes.main, showSymbol: x.length < 60, symbolSize: 4, ...fast, connectNulls: false, itemStyle: { color: dark } };
+    out.push({ ...line, name: v.label, data: pastPts(s.val), lineStyle: { color: dark, width: 2 } });
+    out.push({ ...line, name: `${v.label} forecast`, data: fcLinePts(s.val), lineStyle: { color: dark, width: 2, type: 'dotted' } });
   }
   return out;
 }
@@ -454,7 +470,8 @@ function baseOption(gran, theme, tooltipFmt, gridRight, gridLeft, zoom) {
 }
 
 function themeColors() {
-  return { text: css('--text'), muted: css('--muted'), line: css('--line'), grid: css('--chart-grid'), major: css('--chart-major'), card: css('--card') };
+  return { text: css('--text'), muted: css('--muted'), line: css('--line'), grid: css('--chart-grid'), major: css('--chart-major'), card: css('--card'),
+    dark: parseInt(css('--card').slice(1, 3), 16) < 128 };
 }
 
 /**
@@ -524,7 +541,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   const span = zoom ? zoom.endMs - zoom.startMs : range.max - range.min;
   // Last bar on screen (chosen by the app, same bars as the title text): the running total's value
   // is written there.
-  const endIdx = opts.endIdx ?? -1;
+  const endIdx = opts.endIdx ?? -1, totalIdx = opts.totalIdx ?? endIdx;
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - (mode === 'combined' ? 140 : 112)); // first guess
   tickUnit = unitFor(span);
   topShown = topFor(span);
@@ -536,7 +553,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
     if (i == null) return '';
     const tag = agg.fc?.[i] ? ' <b>· forecast</b>' : '';
     return `<div style="margin-bottom:4px">${fmtHeader(agg.start[i], agg.end[i], agg.last[i], gran)}${tag}</div>` +
-      ks.map((k) => tooltipLine(color(k), VAR_BY_KEY[k].label, describe(k, series[k], i, gran))).join('');
+      ks.map((k) => tooltipLine(agg.fc?.[i] ? lighter(color(k)) : color(k), VAR_BY_KEY[k].label, describe(k, series[k], i, gran))).join('');
   };
 
   // Options for every chart, in display order.
@@ -568,7 +585,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
       const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
-      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc));
+      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc, totalIdx));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
       if (sc && v.kind !== 'dir') {
@@ -592,7 +609,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, 36));
       const opt = baseOption(gran, theme, makeTooltip([k]), 56, 56, zoom);
       opt.yAxis = yAxes;
-      opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc), nowSeries(opts.nowMs, theme)];
+      opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx), nowSeries(opts.nowMs, theme)];
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });
   }

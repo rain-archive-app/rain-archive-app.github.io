@@ -178,7 +178,11 @@ details.sub > summary { font-weight: 400; }
 #units { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0 10px; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
-.view-btns { display: flex; gap: 3px; flex-wrap: wrap; }
+/* Two rows on one grid, so that their buttons line up: the view, then the range of the totals. */
+.view-btns { display: grid; grid-template-columns: repeat(9, auto); justify-content: start; }
+.period-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.row-head { display: grid; place-items: center; color: var(--muted); }
+.row-head svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .view-btns .btn.small { padding: 2px; font-size: 11.5px; min-width: 24px; }
 .view-btns { gap: 2px; }
 .view-btns .btn.icon { width: 24px !important; }
@@ -211,7 +215,7 @@ details.sub > summary { font-weight: 400; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Vertical one-finger swipes still scroll the page; two-finger gestures are handled by the app. */
-.chart { width: 100%; height: 230px; touch-action: pan-y; }
+.chart { width: 100%; height: 230px; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .chart.last { height: 230px; }
 
 /* Time-step stepper in the toolbar: ‹ /h › */
@@ -234,6 +238,35 @@ details.sub > summary { font-weight: 400; }
   background: var(--accent); color: var(--accent-text); font-size: 11px;
 }
 .mark-guide.end span { left: auto; right: 4px; }
+.mark-guide.low span { top: 22px; } /* two marks close together: their labels don't overlap */
+/* Round handles on the waiting marks' lines, to drag them sideways, and on the line joining them. */
+.mark-handle {
+  position: absolute; left: -1px; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%);
+  display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .3); pointer-events: auto; touch-action: none; cursor: ew-resize;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.mark-link { position: absolute; height: 0; border-top: 2px solid var(--accent); pointer-events: none; z-index: 3; }
+.mark-link span {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 1px 5px; border-radius: 4px; white-space: nowrap;
+  background: var(--accent); color: var(--accent-text); font-size: 11px;
+}
+.mark-link .mark-handle { left: 50%; top: -1px; cursor: grab; }
+.mark-link.narrow .mark-handle { top: 34px; } /* no room between the marks' own handles */
+.mark-handle::before { content: ''; position: absolute; inset: -8px; } /* easier to catch with a finger */
+.mark-handle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+/* Long press or right click on a chart. */
+.mark-menu {
+  position: fixed; z-index: 800; min-width: 190px; padding: 4px; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .25);
+}
+.mark-menu[hidden] { display: none; }
+.mark-menu-time { padding: 6px 10px; font-size: 12px; color: var(--muted); }
+.mark-menu button {
+  min-height: 40px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--text);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.mark-menu button:hover { background: var(--chart-grid); }
 /* First mark dropped: what it is, and the second mark to drop next. */
 .btn.mark.next { background: var(--accent); color: var(--accent-text); }
 .mark-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 14px; }
@@ -300,6 +333,8 @@ details.sub > summary { font-weight: 400; }
 .chart-title { margin: 12px 0 0; font-size: 14px; line-height: 1.35; font-variant-numeric: tabular-nums; }
 .chart-title .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .chart-title .name { font-weight: 600; }
+.vars-removable .chart-title :is(.dot, .name) { cursor: pointer; }
+.vars-removable .chart-title .name:hover { text-decoration: line-through; }
 .chart-title .sub { display: block; font-size: 12px; color: var(--muted); margin-left: 15px; }
 .chart-title .sub b { color: var(--text); font-weight: 700; }
 
@@ -322,4 +357,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=63"); }
+  background-image: url("../icons/mapbox-logo.svg?v=80"); }

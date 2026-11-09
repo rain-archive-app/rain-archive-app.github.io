@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=63">
+  <link rel="stylesheet" href="css/app.css?v=80">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=63"></script>
+  <script type="module" src="js/app.js?v=80"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -93,6 +93,10 @@
       </div>
     </div>
     <p id="period-summary" class="muted small"></p>
+    <div class="period-confirm">
+      <button type="button" id="period-fit-view" class="btn">Fit view</button>
+      <button type="button" id="period-fit-total" class="btn primary">Fit totals and view</button>
+    </div>
   </section>
 
   <!-- Data -->
@@ -138,21 +142,39 @@
   <main>
     <section id="results">
       <div class="toolbar">
-        <div id="view-btns" class="view-btns" role="group" aria-label="Chart time window" hidden>
-          <button type="button" class="btn small icon" data-view="period" title="Whole period" aria-label="Whole period">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5v14M21 5v14"/><path d="M7 12h10"/><path d="M9.5 9.5 7 12l2.5 2.5M14.5 9.5 17 12l-2.5 2.5"/></svg>
+        <div id="view-btns" class="view-btns" role="group" aria-label="Chart time window and range of the totals" hidden>
+          <span class="row-head" title="These buttons move the view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
+          <button type="button" class="btn small icon" data-view="period" title="Date-defined period" aria-label="Date-defined period">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
           </button>
           <button type="button" class="btn small icon" data-view="now" title="Up to now (period unchanged)" aria-label="Up to now">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="M12 7.5 16.5 12 12 16.5"/><path d="M20.5 4v16"/></svg>
           </button>
-          <button type="button" class="btn small icon" data-view="forecast" title="Forecast (period unchanged)" aria-label="Forecast">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .6-8 6 6 0 0 0-11.4-1.3A4.7 4.7 0 0 0 7 18z"/><path d="M12 14.5v-5"/><path d="M9.8 11.5 12 9.3l2.2 2.2"/></svg>
+          <button type="button" id="btn-center-view" class="btn small icon" title="Center the view on the range of the totals" aria-label="Center the view on the range of the totals">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
           </button>
           <button type="button" class="btn small" data-view="24">1 d</button>
           <button type="button" class="btn small" data-view="72">3 d</button>
           <button type="button" class="btn small" data-view="168">1 w</button>
           <button type="button" class="btn small" data-view="720">1 m</button>
           <button type="button" class="btn small" data-view="8760">1 y</button>
+          <span class="row-head" title="These buttons set the range of the totals">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 16l4-5 3 3 6-8"/></svg>
+          </span>
+          <button type="button" class="btn small icon" data-total="period" title="Totals over the date-defined period: shows the marks" aria-label="Totals over the date-defined period">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+          </button>
+          <button type="button" class="btn small icon" data-total="now" title="Totals up to now: shows the marks" aria-label="Totals up to now">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="M12 7.5 16.5 12 12 16.5"/><path d="M20.5 4v16"/></svg>
+          </button>
+          <button type="button" class="btn small icon" data-total="center" title="Center the range of the totals on the current view: shows the marks" aria-label="Center the range of the totals on the current view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
+          </button>
+          <button type="button" class="btn small icon" data-total="view" title="Totals over the current view: shows the marks" aria-label="Totals over the current view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5v14M21 5v14"/><path d="M6.5 12s2-3.5 5.5-3.5 5.5 3.5 5.5 3.5-2 3.5-5.5 3.5-5.5-3.5-5.5-3.5z"/><circle cx="12" cy="12" r="1.3"/></svg>
+          </button>
           <!-- In / out marks, as in video editors: drag one onto the chart to set where the period starts or ends -->
           <button type="button" class="btn small icon mark" data-mark="start" title="Drag onto the chart to set the start of the period" aria-label="Period start: drag onto the chart">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5v16h4"/><path d="M11 8.5 17 12l-6 3.5z" fill="currentColor"/></svg>
@@ -193,7 +215,28 @@
           </button>
         </div>
         <div id="mark-guide" class="mark-guide" hidden><span></span></div>
-        <div id="mark-line" class="mark-guide" hidden><span></span></div>
+        <div id="mark-line-start" class="mark-guide" hidden><span></span>
+          <div class="mark-handle" title="Drag to move this mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>
+          </div>
+        </div>
+        <div id="mark-line-end" class="mark-guide end" hidden><span></span>
+          <div class="mark-handle" title="Drag to move this mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>
+          </div>
+        </div>
+        <div id="mark-link" class="mark-link" hidden>
+          <span></span>
+          <div class="mark-handle" title="Drag to move both marks together">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>
+          </div>
+        </div>
+        <div id="mark-menu" class="mark-menu" role="menu" hidden>
+          <div id="mark-menu-time" class="mark-menu-time"></div>
+          <button type="button" role="menuitem" data-menu-mark="start"></button>
+          <button type="button" role="menuitem" data-menu-mark="end"></button>
+          <button type="button" role="menuitem" data-menu-mark="">Cancel</button>
+        </div>
         <div id="charts"></div>
       </div>
       <div id="rangebar" class="rangebar" hidden aria-label="Visible time window: drag to move, long-press an edge or use two fingers to resize"></div>
