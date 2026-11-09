@@ -1,5 +1,5 @@
 // Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=62';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=63';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -12,6 +12,10 @@ export const HOUR = 3600;
 export const STEP_MS = { hour: 3600e3, day: 86400e3, week: 7 * 86400e3, month: 30.436875 * 86400e3, year: 365.2425 * 86400e3 };
 export const STEPS = ['hour', 'day', 'week', 'month', 'year'];
 const FORECAST_PAST_DAYS = 92;
+export const FORECAST_DAYS = 15; // how far ahead the forecast API can be asked for
+const ENSEMBLE = 'https://ensemble-api.open-meteo.com/v1/ensemble';
+const ENSEMBLE_MODEL = 'ecmwf_ifs025'; // 51 runs, 15 days, worldwide
+const ENSEMBLE_DAYS = 15;
 
 // ---------- Time zones ----------
 // All times are unix seconds. "Local" means the selected location's IANA time zone.
@@ -306,19 +310,22 @@ function buildUrl(base, loc, keys, startDate, endDate, model) {
 export async function fetchHourly({ loc, keys, startSec, endSec, model, signal }) {
   const tz = loc.tz;
   const nowSec = Date.now() / 1000;
-  const startDate = localDate(startSec + HOUR, tz);
-  const endDate = localDate(endSec, tz);
-
-  const arch = await getJSON(buildUrl(ARCHIVE, loc, keys, startDate, endDate, model), signal);
+  const pastEnd = Math.min(endSec, floorLocalHour(nowSec, tz));
   const times = [];
-  const idx = [];
-  arch.hourly.time.forEach((t, i) => { if (t > startSec && t <= endSec) { times.push(t); idx.push(i); } });
-  const values = {};
-  for (const k of keys) values[k] = idx.map((i) => arch.hourly[k]?.[i] ?? null);
+  const values = Object.fromEntries(keys.map((k) => [k, []]));
+
+  if (startSec < pastEnd) {
+    const arch = await getJSON(buildUrl(ARCHIVE, loc, keys, localDate(startSec + HOUR, tz), localDate(pastEnd, tz), model), signal);
+    arch.hourly.time.forEach((t, i) => {
+      if (t <= startSec || t > pastEnd) return;
+      times.push(t);
+      for (const k of keys) values[k].push(arch.hourly[k]?.[i] ?? null);
+    });
+  }
 
   // Auto mode: fill recent gaps (reanalysis lag) from the forecast API, which keeps ~3 months of past data.
   let filledHours = 0;
-  if (model === 'best_match') {
+  if (model === 'best_match' && times.length) {
     const oldest = nowSec - (FORECAST_PAST_DAYS - 1) * 86400;
     const gaps = times.map((t, i) => (t >= oldest && keys.some((k) => values[k][i] == null) ? i : -1)).filter((i) => i >= 0);
     if (gaps.length) {
@@ -341,7 +348,91 @@ export async function fetchHourly({ loc, keys, startSec, endSec, model, signal }
       }
     }
   }
+
+  // The future: the forecast's best model for this place, whatever the model chosen for the past
+  // (reanalyses have no future).
+  if (endSec > pastEnd) {
+    const from = Math.max(startSec, pastEnd);
+    const fc = await getJSON(buildUrl(FORECAST, loc, keys, localDate(from + HOUR, tz), localDate(endSec, tz), null), signal);
+    fc.hourly.time.forEach((t, i) => {
+      if (t <= from || t > endSec) return;
+      times.push(t);
+      for (const k of keys) values[k].push(fc.hourly[k]?.[i] ?? null);
+    });
+  }
   return { times, values, filledHours, model, tz };
+}
+
+// The runs of the forecast ensemble, for the uncertainty of the future: { pos: time → row,
+// members: {key: [run, …]} }. Directions and weather codes have no meaningful spread; variables
+// with too few runs (not provided by this ensemble) are left out.
+export async function fetchEnsemble(loc, keys, signal) {
+  const usable = keys.filter((k) => ['sum', 'mean'].includes(VAR_BY_KEY[k].kind));
+  if (!usable.length) return null;
+  const now = Date.now() / 1000;
+  const j = await getJSON(buildUrl(ENSEMBLE, loc, usable, localDate(now, loc.tz), localDate(now + (ENSEMBLE_DAYS - 1) * 86400, loc.tz), ENSEMBLE_MODEL), signal);
+  const members = {};
+  for (const k of usable) {
+    const runs = Object.keys(j.hourly).filter((n) => n === k || n.startsWith(`${k}_member`))
+      .map((n) => j.hourly[n]).filter((run) => run.some((x) => x != null));
+    if (runs.length >= 10) members[k] = runs;
+  }
+  return { pos: new Map(j.hourly.time.map((t, i) => [t, i])), members };
+}
+
+const quantile = (sorted, q) => sorted[Math.floor(q * (sorted.length - 1))];
+
+// Adds to each series of aggregate()'s result the likely range of the forecast bars, between the
+// 10th and 90th percentiles of the ensemble runs: lo[]/hi[], and cumLo[]/cumHi[] for running totals
+// (s.cum as restarted at bar cumFrom). Each run is aggregated like the bars, as a sum's percentile
+// is not the sum of hourly percentiles.
+// The ensemble is much coarser than the forecast (25 km): in the mountains it can be degrees off.
+// So averaged variables take only its spread around its median, centred on the forecast; sums take
+// its percentiles, widened if needed to include the forecast.
+export function addEnsembleBands(agg, raw, ens, keys, units, cumFrom) {
+  const nowSec = Date.now() / 1000;
+  const n = agg.x.length;
+  for (const k of keys) {
+    const s = agg.series[k], v = VAR_BY_KEY[k];
+    s.lo = Array(n).fill(null); s.hi = Array(n).fill(null);
+    s.cumLo = Array(n).fill(null); s.cumHi = Array(n).fill(null);
+    const runs = ens?.members[k];
+    if (!runs) continue;
+    const from = baseUnit(v), unit = displayUnit(v, units);
+    let started = false;
+    const totals = runs.map(() => 0);
+    agg.idx.forEach((hours, b) => {
+      const future = hours.some((i) => raw.times[i] > nowSec && ens.pos.has(raw.times[i]));
+      if (!future && !started) return;
+      if (s.cum && b >= cumFrom && !started) totals.fill(b > cumFrom ? s.cum[b - 1] ?? 0 : 0);
+      started = true;
+      const vals = runs.map((run, m) => {
+        const r = reduce(v.kind, hours.map((i) => {
+          const t = raw.times[i], row = ens.pos.get(t);
+          return (t > nowSec && row != null ? run[row] : null) ?? raw.values[k][i];
+        }));
+        const val = convert(r.val, from, unit);
+        if (val != null) totals[m] += val;
+        return val;
+      }).filter((x) => x != null).sort((a, x) => a - x);
+      const val = s.val[b];
+      if (future && vals.length && val != null) {
+        const q10 = quantile(vals, 0.1), q50 = quantile(vals, 0.5), q90 = quantile(vals, 0.9);
+        if (v.kind === 'sum') {
+          s.lo[b] = Math.min(q10, val); s.hi[b] = Math.max(q90, val);
+        } else {
+          s.lo[b] = val + q10 - q50; s.hi[b] = val + q90 - q50;
+          if (from !== '°C') s.lo[b] = Math.max(0, s.lo[b]); // only temperatures go below zero
+          if (unit === '%') s.hi[b] = Math.min(100, s.hi[b]);
+        }
+      }
+      if (s.cum && b >= cumFrom && s.cum[b] != null) {
+        const t = [...totals].sort((a, x) => a - x);
+        s.cumLo[b] = Math.min(quantile(t, 0.1), s.cum[b]);
+        s.cumHi[b] = Math.max(quantile(t, 0.9), s.cum[b]);
+      }
+    });
+  }
 }
 
 // ---------- Aggregation ----------
@@ -361,7 +452,8 @@ function reduce(kind, arr) {
 
 /**
  * mode: 'hour' | 'day' | 'week' | 'month' | 'year' | 'total'.
- * Returns { x, start, end, last: [wall ms], hours: [hours per bucket], series: {key: {unit, val[], min[], max[], cum[]|null, n[]}} }.
+ * Returns { x, start, end, last: [wall ms], hours: [hours per bucket], idx: [hour indices per bucket], fc: [holds forecast hours],
+ * series: {key: {unit, val[], min[], max[], cum[]|null, n[]}} }.
  * last is the end of the latest hour with data in the bucket (before `end` when the bucket is still running).
  * Each bucket covers [start, end) in local wall time and is drawn at its middle x.
  * Running totals (cum) start at the first bucket that begins at or after cumFromMs.
@@ -425,8 +517,11 @@ export function aggregate(raw, keys, mode, units, cumFromMs = -Infinity) {
     }
     series[k] = s;
   }
+  const nowSec = Date.now() / 1000;
   return {
     x: buckets.map((b) => (b.start + b.end) / 2), start: buckets.map((b) => b.start), end: buckets.map((b) => b.end),
     last: buckets.map((b) => b.last), hours: buckets.map((b) => b.idx.length), series,
+    idx: buckets.map((b) => b.idx),
+    fc: buckets.map((b) => b.idx.some((i) => times[i] > nowSec)), // bars holding forecast hours
   };
 }

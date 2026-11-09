@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=62">
+  <link rel="stylesheet" href="css/app.css?v=63">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=62"></script>
+  <script type="module" src="js/app.js?v=63"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -144,6 +144,9 @@
           </button>
           <button type="button" class="btn small icon" data-view="now" title="Up to now (period unchanged)" aria-label="Up to now">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="M12 7.5 16.5 12 12 16.5"/><path d="M20.5 4v16"/></svg>
+          </button>
+          <button type="button" class="btn small icon" data-view="forecast" title="Forecast (period unchanged)" aria-label="Forecast">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .6-8 6 6 0 0 0-11.4-1.3A4.7 4.7 0 0 0 7 18z"/><path d="M12 14.5v-5"/><path d="M9.8 11.5 12 9.3l2.2 2.2"/></svg>
           </button>
           <button type="button" class="btn small" data-view="24">1 d</button>
           <button type="button" class="btn small" data-view="72">3 d</button>

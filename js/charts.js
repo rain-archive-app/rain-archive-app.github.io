@@ -1,11 +1,12 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=62';
-import { fmtWall, STEP_MS } from './data.js?v=62';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=63';
+import { fmtWall, STEP_MS } from './data.js?v=63';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
 const DAY = 86400e3;
+const FC_OPACITY = 0.5; // forecast bars and dots, lighter than the past
 let instances = [];
 let current = null; // {sig, titleEls: {key: el}, gran}
 
@@ -314,8 +315,13 @@ function describe(key, s, i, gran) {
   if (v.kind === 'code') return wmoLabel(s.val[i]);
   if (v.kind === 'dir') return s.val[i] == null ? '–' : `${Math.round(s.val[i])}° ${compass(s.val[i])}`;
   let t = fmtVal(s.val[i], s.unit);
-  if (v.kind === 'mean' && gran !== 'hour' && s.min[i] != null) t += ` <span style="opacity:.75">(${fmtVal(s.min[i], s.unit)} – ${fmtVal(s.max[i], s.unit)})</span>`;
-  if (s.cum) t += ` <span style="opacity:.75">· total ${fmtVal(s.cum[i], s.unit)}</span>`;
+  if (s.lo?.[i] != null) t += ` <span style="opacity:.75">(likely ${fmtVal(s.lo[i], s.unit)} – ${fmtVal(s.hi[i], s.unit)})</span>`;
+  else if (v.kind === 'mean' && gran !== 'hour' && s.min[i] != null) t += ` <span style="opacity:.75">(${fmtVal(s.min[i], s.unit)} – ${fmtVal(s.max[i], s.unit)})</span>`;
+  if (s.cum) {
+    t += ` <span style="opacity:.75">· total ${fmtVal(s.cum[i], s.unit)}`;
+    if (s.cumLo?.[i] != null) t += ` (${fmtVal(s.cumLo[i], s.unit)} – ${fmtVal(s.cumHi[i], s.unit)})`;
+    t += '</span>';
+  }
   return t;
 }
 
@@ -323,17 +329,39 @@ function describe(key, s, i, gran) {
 
 // Series for one variable. axes = {main, cum} y-axis indices.
 // endIdx: last bar on screen; the running total shows its value there, in bold.
-function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX) {
+function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = []) {
   const v = VAR_BY_KEY[key];
   const pts = (arr) => x.map((t, i) => [t, arr[i]]);
+  // The same values split between past and forecast. Forecast lines start at the last past point.
+  const pastPts = (arr) => x.map((t, i) => [t, fc[i] ? null : arr[i]]);
+  const fcPts = (arr) => x.map((t, i) => [t, fc[i] ? arr[i] : null]);
+  const fcLinePts = (arr) => x.map((t, i) => [t, fc[i] || fc[i + 1] ? arr[i] : null]);
   const out = [];
   // Long series: bars drawn in "large" batch mode, lines thinned to their visible shape (LTTB).
   const many = x.length > 2000;
   const fast = { sampling: 'lttb', progressive: 4000 };
+  // Shaded band between lo[] and hi[], as an invisible base and a stacked height. stackStrategy "all"
+  // because the default only stacks values of the same sign, which breaks bands crossing zero.
+  const band = (name, lo, hi, col, yAxisIndex, opacity, step = false) => {
+    const stack = `${name}-${key}`;
+    const common = { type: 'line', yAxisIndex, stack, stackStrategy: 'all', showSymbol: false, lineStyle: { opacity: 0 }, silent: true, step };
+    out.push({ ...common, name: `${v.label} ${name} base`, data: pts(lo) });
+    out.push({ ...common, name: `${v.label} ${name}`, areaStyle: { color: col, opacity },
+      data: x.map((t, i) => [t, lo[i] == null || hi[i] == null ? null : hi[i] - lo[i]]) });
+  };
   if (v.kind === 'sum') {
-    out.push({ name: v.label, type: 'bar', yAxisIndex: axes.main, data: pts(s.val), itemStyle: { color }, barMaxWidth: 40, barCategoryGap: '15%',
-      large: many, largeThreshold: 2000 });
+    // Stacked on each other (one of the two is always empty) so that they share one bar slot.
+    const bars = { type: 'bar', yAxisIndex: axes.main, stack: `bars-${key}`, barMaxWidth: 40, barCategoryGap: '15%', large: many, largeThreshold: 2000 };
+    out.push({ ...bars, name: v.label, data: pastPts(s.val), itemStyle: { color } });
+    out.push({ ...bars, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color, opacity: FC_OPACITY } });
+    band('likely', s.lo, s.hi, color, axes.main, 0.22, 'middle');
+    band('total range', s.cumLo, s.cumHi, theme.text, axes.cum, 0.1);
     const endVal = endIdx >= 0 ? s.cum[endIdx] : null;
+    const endLo = endIdx >= 0 ? s.cumLo[endIdx] : null;
+    const d = decimals(s.unit);
+    const endText = endVal == null ? '' : `Total ${endVal.toFixed(d)}`
+      + (endLo != null ? ` (${endLo.toFixed(d)}–${s.cumHi[endIdx].toFixed(d)})` : '')
+      + (fc[endIdx] ? ' incl. forecast' : '');
     out.push({ name: `${v.label} – running total`, type: 'line', yAxisIndex: axes.cum, data: pts(s.cum), showSymbol: false, ...fast,
       lineStyle: { color: theme.text, width: 1.5, type: 'dashed', opacity: 0.8 }, itemStyle: { color: theme.text }, z: 3,
       markPoint: endVal == null ? { data: [] } : {
@@ -343,23 +371,37 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX) {
         // (placeTotalLabels moves it below the point, on a background, when there is no room above)
         label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: 11,
           backgroundColor: 'transparent', padding: 0,
-          formatter: () => `Total ${endVal.toFixed(decimals(s.unit))}` },
+          formatter: () => endText },
         data: [{ coord: [endX ?? x[endIdx], endVal] }],
       } });
   } else if (v.kind === 'dir' || v.kind === 'code') {
-    out.push({ name: v.label, type: 'scatter', yAxisIndex: axes.main, data: pts(s.val), symbolSize: many ? 3 : 6, itemStyle: { color },
-      large: many, largeThreshold: 2000 });
+    const dots = { type: 'scatter', yAxisIndex: axes.main, symbolSize: many ? 3 : 6, large: many, largeThreshold: 2000 };
+    out.push({ ...dots, name: v.label, data: pastPts(s.val), itemStyle: { color } });
+    out.push({ ...dots, name: `${v.label} forecast`, data: fcPts(s.val), itemStyle: { color, opacity: FC_OPACITY } });
   } else {
     if (gran !== 'hour') {
-      const stack = `band-${key}`;
-      out.push({ name: `${v.label} min`, type: 'line', yAxisIndex: axes.main, data: pts(s.min), stack, showSymbol: false, lineStyle: { opacity: 0 }, silent: true, ...fast });
-      out.push({ name: `${v.label} range`, type: 'line', yAxisIndex: axes.main, data: x.map((t, i) => [t, s.max[i] == null ? null : s.max[i] - s.min[i]]),
-        stack, showSymbol: false, lineStyle: { opacity: 0 }, areaStyle: { color, opacity: 0.18 }, silent: true, ...fast });
+      // Lowest and highest of each bar; where the forecast has a likely range, that band replaces it.
+      const noBand = (arr) => arr.map((a, i) => (s.lo[i] == null ? a : null));
+      band('range', noBand(s.min), noBand(s.max), color, axes.main, 0.18);
     }
-    out.push({ name: v.label, type: 'line', yAxisIndex: axes.main, data: pts(s.val), showSymbol: x.length < 60, symbolSize: 4, ...fast,
-      connectNulls: false, lineStyle: { color, width: 2 }, itemStyle: { color } });
+    band('likely', s.lo, s.hi, color, axes.main, 0.25);
+    const line = { type: 'line', yAxisIndex: axes.main, showSymbol: x.length < 60, symbolSize: 4, ...fast, connectNulls: false, itemStyle: { color } };
+    out.push({ ...line, name: v.label, data: pastPts(s.val), lineStyle: { color, width: 2 } });
+    out.push({ ...line, name: `${v.label} forecast`, data: fcLinePts(s.val), lineStyle: { color, width: 2, type: 'dashed' } });
   }
   return out;
+}
+
+// The present on the time axis: a vertical line, and everything after it lightly shaded.
+function nowSeries(nowMs, theme) {
+  const on = nowMs != null && nowMs < chartRange.max;
+  return { name: 'Now', type: 'line', yAxisIndex: 0, data: [], silent: true,
+    markLine: { silent: true, symbol: 'none', animation: false, precision: 0,
+      lineStyle: { color: theme.text, type: 'solid', width: 1.5, opacity: 0.7 },
+      label: { formatter: 'Now', position: 'end', color: theme.text, fontSize: 10, fontWeight: 700 },
+      data: on ? [{ xAxis: nowMs }] : [] },
+    markArea: { silent: true, animation: false, itemStyle: { color: theme.muted, opacity: 0.08 },
+      data: on ? [[{ xAxis: nowMs }, { xAxis: chartRange.max }]] : [] } };
 }
 
 // Unit names run vertically along their axis, so the space above the plot stays free for weekdays.
@@ -467,6 +509,7 @@ export function renderEmpty(container, gran, message, opts = {}) {
  * agg: result of aggregate(); keys: variables; gran: 'hour'|'day'|'month'|'year'; mode: 'stacked'|'combined'.
  * opts.range: {min, max} x range (wall ms), defaults to the data extent;
  * opts.zoom: {startMs, endMs} visible window (wall ms);
+ * opts.nowMs: the present (wall ms), marked on the axis when the future is on it;
  * opts.onZoom({startMs, endMs}) is called after the user zooms or pans.
  */
 export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
@@ -491,7 +534,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   const makeTooltip = (ks) => (params) => {
     const i = params[0]?.dataIndex;
     if (i == null) return '';
-    return `<div style="margin-bottom:4px">${fmtHeader(agg.start[i], agg.end[i], agg.last[i], gran)}</div>` +
+    const tag = agg.fc?.[i] ? ' <b>· forecast</b>' : '';
+    return `<div style="margin-bottom:4px">${fmtHeader(agg.start[i], agg.end[i], agg.last[i], gran)}${tag}</div>` +
       ks.map((k) => tooltipLine(color(k), VAR_BY_KEY[k].label, describe(k, series[k], i, gran))).join('');
   };
 
@@ -524,7 +568,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
       const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
-      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX));
+      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
       if (sc && v.kind !== 'dir') {
@@ -536,7 +580,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
     const lefts = Math.ceil(axes.length / 2), rights = Math.floor(axes.length / 2);
     const opt = baseOption(gran, theme, makeTooltip(keys), 8 + Math.max(rights, 1) * AX_W, 8 + lefts * AX_W, zoom);
     opt.yAxis = axes.map(({ id, fixed, kind, ...a }) => (kind ? applyScale(a, kind, fixed) : a));
-    opt.series = all; // no legend: the coloured titles above the chart play that role
+    opt.series = [...all, nowSeries(opts.nowMs, theme)]; // no legend: the coloured titles above the chart play that role
     charts.push({ opt, cls: 'chart combined' });
   } else {
     keys.forEach((k, n) => {
@@ -548,7 +592,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, 36));
       const opt = baseOption(gran, theme, makeTooltip([k]), 56, 56, zoom);
       opt.yAxis = yAxes;
-      opt.series = seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX);
+      opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc), nowSeries(opts.nowMs, theme)];
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });
   }

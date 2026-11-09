@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=62';
+} from './vars.js?v=63';
 import {
-  HOUR, STEP_MS, STEPS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, aggregate,
+  HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=62';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=62';
-import { createRangeBar } from './rangebar.js?v=62';
+} from './data.js?v=63';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep } from './charts.js?v=63';
+import { createRangeBar } from './rangebar.js?v=63';
 
 const $ = (id) => document.getElementById(id);
 
@@ -98,6 +98,7 @@ function save() {
 
 const tz = () => state.loc?.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
 const nowHour = () => floorLocalHour(Date.now() / 1000, tz());
+const lastHour = () => nowHour() + FORECAST_DAYS * 86400; // the end of the forecast
 
 // ---------- Tabs (settings panels shown as an overlay under the header) ----------
 
@@ -638,7 +639,7 @@ function computeWindow() {
     E = zonedToUnix(state.rangeEnd, z);
     if (S == null || E == null) return { error: 'Choose both start and end.' };
   }
-  if (E > now) { E = now; note = 'End moved to the current hour.'; }
+  if (E > lastHour()) { E = lastHour(); note = `End moved to the limit of the forecast (${FORECAST_DAYS} days).`; }
   if (S >= E) return { error: 'Start must be before end.' };
   if (S < MIN_DATE) return { error: 'Data is only available from 1 January 1940.' };
   if (E - S > MAX_SPAN_DAYS * 86400) return { error: 'Please choose a period of 20 years or less.' };
@@ -691,7 +692,7 @@ function convertOtherMode(to) {
     } else if (state.end) state.rangeEnd = state.end;
   } else {
     const S = zonedToUnix(state.rangeStart, z), E = zonedToUnix(state.rangeEnd, z);
-    if (E != null) { state.end = state.rangeEnd; state.endNow = E >= nowHour(); }
+    if (E != null) { state.end = state.rangeEnd; state.endNow = E === nowHour(); }
     if (S != null && E != null && E > S) {
       const d = bestDuration(S, E, z);
       state.qty = d.qty;
@@ -854,7 +855,7 @@ function scheduleFetch(delay = 400) {
 const unwall = (ms) => { const s = ms / 1000; return s - tzOffset(s, raw.tz); }; // wall ms → unix s
 function axisAround(S, E) {
   const span = E - S;
-  return { S: Math.max(MIN_DATE, floorLocalHour(S - span, tz())), E: Math.min(nowHour(), E + span) };
+  return { S: Math.max(MIN_DATE, floorLocalHour(S - span, tz())), E: Math.min(lastHour(), E + span) };
 }
 // Data needed to draw [S, E] with whole bars: widened to the bars that contain both ends.
 function wholeBars({ S, E }) {
@@ -933,7 +934,7 @@ async function ensureData({ S, E }) {
   if (!raw) return false;
   const target = raw;
   S = Math.max(MIN_DATE, floorLocalHour(S, target.tz));
-  E = Math.min(nowHour(), E);
+  E = Math.min(lastHour(), E);
   if (!Object.keys(target.values).length) return false; // no variable: nothing to load
   if (S >= target.loadedS && E <= target.loadedE) return false;
   const ctrl = new AbortController();
@@ -1046,6 +1047,8 @@ function yScales(keys, agg) {
       const top = banded ? s.max[i] : s.val[i], bottom = banded ? s.min[i] : s.val[i];
       if (top != null && top > hi) hi = top;
       if (v.kind !== 'sum' && bottom != null && bottom < lo) lo = bottom;
+      if (s.hi?.[i] != null && s.hi[i] > hi) hi = s.hi[i];
+      if (v.kind !== 'sum' && s.lo?.[i] != null && s.lo[i] < lo) lo = s.lo[i];
     });
     out[k] = v.kind === 'sum' ? { min: 0, max: niceRange(0, hi).max } : niceRange(lo, hi);
   }
@@ -1080,7 +1083,7 @@ async function relayout() {
   const vS = unwall(zoomWin.startMs), vE = unwall(zoomWin.endMs);
   const span = vE - vS;
   const nearLeft = vS - axis.S < span * 0.5 && axis.S > MIN_DATE;
-  const nearRight = axis.E - vE < span * 0.5 && axis.E < nowHour();
+  const nearRight = axis.E - vE < span * 0.5 && axis.E < lastHour();
   const ratio = (axis.E - axis.S) / span;
   if (!nearLeft && !nearRight && ratio > 2 && ratio < 4.5) {
     // Same axis: running totals restart at the new left edge and the y scales check what is now
@@ -1164,7 +1167,8 @@ function watchSlow(what, cancel) {
 
 // ---------- View buttons ----------
 // Period: the saved period. Up to now: the current visible length, ending now (the saved period is
-// not changed). 1 d…1 y: that length, ending where the chart currently ends.
+// not changed). Forecast: from yesterday to the end of the forecast (period not changed either).
+// 1 d…1 y: that length, ending where the chart currently ends.
 
 let activeView = null;
 let lastX = [], lastStart = [], lastEnd = []; // bars of the last render: middle, start, end (wall ms)
@@ -1193,8 +1197,11 @@ function viewWindow(view, spanSec, anchorMs) {
     i0 = firstBarAfter(wallMs(rawWindow.S, raw.tz));
     i1 = lastBarBefore(wallMs(rawWindow.E, raw.tz));
   } else if (view === 'now') {
-    i1 = lastStart.length - 1;
+    i1 = lastBarBefore(wallMs(nowHour(), raw.tz));
     i0 = Math.max(0, i1 - Math.max(1, Math.round((spanSec * 1000) / STEP_MS[state.agg])) + 1);
+  } else if (view === 'forecast') {
+    i0 = firstBarAfter(wallMs(nowHour() - 86400, raw.tz));
+    i1 = lastBarBefore(wallMs(lastHour(), raw.tz));
   } else {
     i1 = lastBarBefore(anchorMs);
     i0 = Math.max(0, i1 - viewBuckets(view) + 1);
@@ -1211,7 +1218,8 @@ async function applyView(view) {
   else if (view === 'now') {
     spanSec = zoomWin ? (zoomWin.endMs - zoomWin.startMs) / 1000 : rawWindow.E - rawWindow.S;
     E = nowHour(); S = E - spanSec;
-  } else {
+  } else if (view === 'forecast') { S = nowHour() - 86400; E = lastHour(); }
+  else {
     E = unwall(anchorMs) + stepSec;
     S = E - (viewBuckets(view) + 1) * stepSec;
   }
@@ -1354,7 +1362,7 @@ function applyMarks({ start, end }) {
   Object.assign(state, {
     otherMode: 'range',
     rangeStart: unixToZonedInput(Math.max(MIN_DATE, S), z),
-    rangeEnd: unixToZonedInput(Math.min(nowHour(), E), z),
+    rangeEnd: unixToZonedInput(Math.min(lastHour(), E), z),
   });
   save();
   syncPeriodUI();
@@ -1418,6 +1426,37 @@ function modelUsedText(keys, S, E) {
   if (E > IFS_FROM) parts.push(S < IFS_FROM ? 'then ECMWF IFS 9 km' : 'ECMWF IFS 9 km');
   let t = `Currently used: ${parts.join(', ')}.`;
   if (period.filledHours) t += ` Last ${period.filledHours} h from Open-Meteo forecast.`;
+  return t;
+}
+
+// ---------- Uncertainty of the forecast ----------
+// The ensemble runs are heavy and only serve the future: downloaded when the future comes on screen,
+// kept for an hour.
+let ens = { key: '', data: null, at: 0, failed: false };
+const ensKey = (keys) => [state.loc.lat, state.loc.lon, [...keys].sort().join(',')].join('|');
+const futureOnScreen = () => !!zoomWin && zoomWin.endMs > wallMs(nowHour(), raw.tz);
+
+async function refreshEnsemble(keys) {
+  if (!futureOnScreen() || !keys.length) return;
+  const key = ensKey(keys);
+  if (ens.key === key && Date.now() - ens.at < 3600e3) return;
+  ens = { key, data: null, at: Date.now(), failed: false };
+  try {
+    const data = await fetchEnsemble(state.loc, keys, fetchAbort?.signal);
+    if (ens.key !== key) return; // superseded
+    ens.data = data;
+  } catch (e) {
+    if (e.name === 'AbortError') { if (ens.key === key) ens.key = ''; return; }
+    if (ens.key === key) ens.failed = true; // the forecast still shows, without its range
+  }
+  renderResults();
+}
+
+function forecastText() {
+  if (!futureOnScreen()) return '';
+  let t = ' After now: Open-Meteo forecast (its best model for this place).';
+  if (ens.data) t += ' Shaded: likely range, where 80% of the 51 ECMWF ensemble runs fall.';
+  else if (ens.failed) t += ' Likely range unavailable for now.';
   return t;
 }
 
@@ -1499,11 +1538,12 @@ function renderResults() {
   // first of them and its value is written at the last.
   const vis = visibleBars(agg);
   restartRunningTotals(agg, vis);
+  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, vis ? vis.i0 : 0);
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
-    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1,
+    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx: vis ? vis.i1 : -1, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the last bar's middle, kept on screen when that bar is wider than the view.
       endX: vis && zoomWin ? Math.min(Math.max(agg.x[vis.i1], zoomWin.startMs), zoomWin.endMs) : undefined });
   // Time bar: the axis range, the visible window, and the first variable's profile.
@@ -1512,8 +1552,9 @@ function renderResults() {
   rangeBar.update({ ...chartRange, start: zoomWin ? zoomWin.startMs : chartRange.min, end: zoomWin ? zoomWin.endMs : chartRange.max,
     shadow: lastShadow, unit: state.agg });
 
-  $('model-used').textContent = modelUsedText(keys, rawWindow.S, rawWindow.E);
+  $('model-used').textContent = modelUsedText(keys, rawWindow.S, rawWindow.E) + forecastText();
   placePendingLine();
+  refreshEnsemble(keys);
   return true;
 }
 
