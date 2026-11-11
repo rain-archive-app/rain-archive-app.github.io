@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=80';
-import { fmtWall, STEP_MS } from './data.js?v=80';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=92';
+import { fmtWall, STEP_MS } from './data.js?v=92';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -293,6 +293,27 @@ function placeTotalLabels() {
   }
 }
 
+// Where the "Total …" labels are on screen (client pixels), so the marks' handles can keep clear of them.
+let measureCtx = null;
+export function totalLabelBoxes() {
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  measureCtx.font = `700 11px ${getComputedStyle(document.body).fontFamily}`;
+  const boxes = [];
+  for (const chart of instances) {
+    const dom = chart.getDom().getBoundingClientRect();
+    for (const s of chart.getOption().series) {
+      const mp = s.markPoint, coord = mp?.data?.[0]?.coord;
+      if (!coord) continue;
+      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: s.yAxisIndex ?? 0 }, coord) ?? [];
+      if (py == null || Number.isNaN(py)) continue;
+      const w = measureCtx.measureText(mp.label.formatter()).width + 6;
+      const top = mp.label.position === 'bottom' ? py + 4 : py - 4 - LABEL_H;
+      boxes.push({ left: dom.left + px - w, right: dom.left + px, top: dom.top + top, bottom: dom.top + top + LABEL_H });
+    }
+  }
+  return boxes;
+}
+
 export function setZoom(startMs, endMs) {
   instances[0]?.dispatchAction({ type: 'dataZoom', startValue: startMs, endValue: endMs }); // connected charts follow
 }
@@ -430,6 +451,22 @@ function yAxis(name, unitKind, theme, position, offset, showGrid, gap) {
   if (unitKind === 'sum') ax.min = 0;
   if (unitKind === 'dir') Object.assign(ax, { min: 0, max: 360, interval: 90, axisLabel: { color: theme.muted, fontSize: 11, formatter: (d) => compass(d) } });
   return ax;
+}
+
+// Room for an axis's numbers, estimated from the values it may show (wider than needed rather than
+// narrower: the y axis may rescale to the visible part only), then its unit name, then the edge.
+function axisRoom(arrs, sc, kind, fs) {
+  let lo = Infinity, hi = -Infinity;
+  for (const a of arrs) for (const v of a ?? []) if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (sc) { lo = Math.min(lo, sc.min); hi = Math.max(hi, sc.max); }
+  let chars = 3;
+  if (kind === 'dir') chars = 2;
+  else if (hi >= lo) {
+    chars = String(Math.round(Math.max(Math.abs(lo), Math.abs(hi)) * 1.2)).length + (lo < 0 ? 1 : 0);
+    if (hi - lo < 3) chars = Math.max(chars + 2, 3); // ticks like 0.5
+  }
+  const gap = Math.ceil(chars * fs * 0.62) + 5 + 8; // numbers, their margin, half the rotated name
+  return { gap, side: gap + 8 };
 }
 
 // Fixed y range (from the app's reference percentiles), or back to automatic when there is none.
@@ -604,10 +641,18 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const v = VAR_BY_KEY[k];
       const s = series[k];
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
-      const yAxes = [yAxis(unitName, v.kind, theme, 'left', 0, true, 36)];
+      // Each side only as wide as its numbers need, so the plot gets the rest.
+      const fs = narrow ? 10 : 11;
+      const left = axisRoom([s.val, s.lo, s.hi, s.min, s.max], opts.yScale?.[k], v.kind, fs);
+      const right = s.cum ? axisRoom([s.cum, s.cumLo, s.cumHi], null, 'sum', fs) : { side: 10 };
+      const yAxes = [yAxis(unitName, v.kind, theme, 'left', 0, true, left.gap)];
       applyScale(yAxes[0], v.kind, opts.yScale?.[k]);
-      if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, 36));
-      const opt = baseOption(gran, theme, makeTooltip([k]), 56, 56, zoom);
+      if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, right.gap));
+      for (const ax of yAxes) {
+        ax.axisLabel = { ...ax.axisLabel, fontSize: fs, margin: 5 };
+        ax.nameTextStyle = { ...ax.nameTextStyle, fontSize: fs };
+      }
+      const opt = baseOption(gran, theme, makeTooltip([k]), right.side, left.side, zoom);
       opt.yAxis = yAxes;
       opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx), nowSeries(opts.nowMs, theme)];
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });

@@ -78,7 +78,7 @@ a { color: var(--accent); }
 .tab[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-main { width: 90%; margin: 0 auto; padding: 10px 0 8px; }
+main { width: calc(100% - 2 * clamp(6px, 2.5vw, 40px)); margin: 0 auto; padding: 10px 0 8px; }
 
 /* Settings panels: overlay right under the sticky header, whatever the scroll position. */
 #panel-backdrop { position: fixed; inset: 0; z-index: 450; background: rgba(0, 0, 0, .28); }
@@ -179,10 +179,28 @@ details.sub > summary { font-weight: 400; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
 /* Two rows on one grid, so that their buttons line up: the view, then the range of the totals. */
-.view-btns { display: grid; grid-template-columns: repeat(9, auto); justify-content: start; }
+/* Columns 1 to 3: curved arrow, row head, curved arrow; the buttons fill the columns after them. */
+.view-btns { display: grid; grid-template-columns: repeat(11, auto); justify-content: start; }
 .period-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.row-head { display: grid; place-items: center; color: var(--muted); }
-.row-head svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.row-head {
+  display: grid; place-items: center; width: 28px; height: 28px; align-self: center; color: var(--accent);
+}
+.row-head.view-head { grid-column: 2; grid-row: 1; }
+.row-head.total-head { grid-column: 2; grid-row: 2; }
+.row-head svg { width: 18px; height: 18px; overflow: visible; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.row-head svg .thin { stroke-width: 1.2; }
+.row-head svg .fill { fill: currentColor; stroke: none; }
+.swap {
+  grid-row: 1 / span 2; align-self: stretch; width: 14px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--accent);
+}
+.swap svg { overflow: visible; }
+.swap.left { grid-column: 1; }
+.swap.right { grid-column: 3; margin-right: 4px; }
+.swap svg { width: 14px; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.swap svg .head { fill: currentColor; }
+.swap:hover svg { stroke-width: 2.6; }
+.swap:disabled { opacity: .3; cursor: default; }
 .view-btns .btn.small { padding: 2px; font-size: 11.5px; min-width: 24px; }
 .view-btns { gap: 2px; }
 .view-btns .btn.icon { width: 24px !important; }
@@ -224,14 +242,10 @@ details.sub > summary { font-weight: 400; }
 .stepper .btn.icon:disabled { opacity: .3; }
 .step-label { min-width: 24px; text-align: center; font-size: 12.5px; font-weight: 700; }
 
-/* In / out marks: dragged from the toolbar onto the chart (or the time bar). */
-.btn.mark { touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; color: var(--accent); }
-.mark-ghost {
-  position: fixed; z-index: 800; pointer-events: none; transform: translate(-50%, -130%);
-  padding: 3px 8px; border-radius: 6px; background: var(--accent); color: var(--accent-text);
-  font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: 0 4px 12px rgba(0, 0, 0, .25);
-}
-.mark-ghost.off { background: var(--muted); }
+/* Marks: set by two clicks on the chart once the toolbar button is on. */
+.btn.mark { color: var(--accent); }
+.btn.mark.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.drawing-marks .chart { cursor: crosshair; }
 .mark-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent); pointer-events: none; z-index: 3; }
 .mark-guide span {
   position: absolute; top: 0; left: 4px; padding: 1px 5px; border-radius: 4px; white-space: nowrap;
@@ -268,7 +282,6 @@ details.sub > summary { font-weight: 400; }
 }
 .mark-menu button:hover { background: var(--chart-grid); }
 /* First mark dropped: what it is, and the second mark to drop next. */
-.btn.mark.next { background: var(--accent); color: var(--accent-text); }
 .mark-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 14px; }
 .mark-pending[hidden] { display: none; }
 .mark-pending span { flex: 1 1 200px; }
@@ -357,4 +370,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=80"); }
+  background-image: url("../icons/mapbox-logo.svg?v=92"); }
