@@ -58,7 +58,7 @@ export function createRangeBar(el, { onChange, onEnd, minSpan, stepFor = () => H
   const thumb = el.querySelector('.rb-thumb');
   const svg = el.querySelector('.rb-svg');
   const labL = el.querySelector('.rb-lab-l'), labR = el.querySelector('.rb-lab-r');
-  let min = 0, max = 1, start = 0, end = 1, span = minSpan, unit = 'hour', shadow = null;
+  let min = 0, max = 1, start = 0, end = 1, span = minSpan, unit = 'hour', shadow = null, now = null;
   let g = null;              // current gesture
   const pointers = new Map(); // pointerId → clientX
 
@@ -99,8 +99,11 @@ export function createRangeBar(el, { onChange, onEnd, minSpan, stepFor = () => H
   function drawTrack() {
     const w = W(), h = track.clientHeight;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    // The present, as the dark "Now" line of the charts.
+    const nowX = now != null && now > min && now < max ? toX(now).toFixed(1) : null;
     el.querySelector('.rb-ticks').innerHTML = ticks(min, max, w)
-      .map((t) => { const x = toX(t).toFixed(1); return `<line x1="${x}" x2="${x}" y1="0" y2="${h}"/>`; }).join('');
+      .map((t) => { const x = toX(t).toFixed(1); return `<line x1="${x}" x2="${x}" y1="0" y2="${h}"/>`; }).join('')
+      + (nowX ? `<line class="rb-now" x1="${nowX}" x2="${nowX}" y1="0" y2="${h}"/>` : '');
     const path = el.querySelector('.rb-shadow');
     if (!shadow) { path.setAttribute('d', ''); return; }
     // One column per 2 px holding the largest value: cheap even for years of hourly data.
@@ -207,9 +210,10 @@ export function createRangeBar(el, { onChange, onEnd, minSpan, stepFor = () => H
 
   return {
     isDragging: () => pointers.size > 0,
-    // o: {min, max, minSpan, start, end, shadow: [[t, v], …], unit, redraw}; all optional.
+    // o: {min, max, minSpan, start, end, shadow: [[t, v], …], unit, now, redraw}; all optional.
     update(o) {
       let rescaled = false;
+      if (o.now !== undefined && o.now !== now) { now = o.now; rescaled = true; }
       if (o.min != null && (o.min !== min || o.max !== max)) { min = o.min; max = o.max; rescaled = true; }
       if (o.minSpan != null) span = o.minSpan;
       if (o.unit) unit = o.unit;

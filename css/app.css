@@ -326,6 +326,7 @@ details.sub > summary { font-weight: 400; }
 }
 .rb-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rb-ticks line { stroke: var(--chart-grid); stroke-width: 1; }
+.rb-ticks line.rb-now { stroke: var(--text); stroke-width: 2; }
 .rb-shadow { fill: var(--accent); opacity: .22; }
 .rb-thumb {
   position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -367,4 +368,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=97"); }
+  background-image: url("../icons/mapbox-logo.svg?v=100"); }

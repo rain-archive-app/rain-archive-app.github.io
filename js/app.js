@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=97';
+} from './vars.js?v=100';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=97';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=97';
-import { createRangeBar } from './rangebar.js?v=97';
+} from './data.js?v=100';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=100';
+import { createRangeBar } from './rangebar.js?v=100';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1701,7 +1701,7 @@ function renderResults() {
     renderEmpty($('charts'), state.agg, 'No data selected\nChoose a variable in the Data tab', { range, zoom: zoomWin, onZoom: onChartZoom });
     $('rangebar').hidden = false;
     rangeBar.update({ ...chartRange, start: zoomWin ? zoomWin.startMs : chartRange.min, end: zoomWin ? zoomWin.endMs : chartRange.max,
-      shadow: [], unit: state.agg });
+      shadow: [], unit: state.agg, now: wallMs(nowHour(), raw.tz) });
     $('model-used').textContent = '';
     placePendingLine();
     return true;
@@ -1742,8 +1742,8 @@ function renderResults() {
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
     { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
-      // Where the value is written: the last bar's middle, kept on screen when that bar is wider than the view.
-      endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.x[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
+      // Where the value is written: the end of the last bar (where the end mark sits), kept on screen.
+      endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.end[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
   const removable = state.vars.length > 1;
   $('charts').classList.toggle('vars-removable', removable);
   $('charts').querySelectorAll('.chart-title').forEach((t) => { t.title = removable ? 'Click to remove from the charts' : ''; });
@@ -1751,7 +1751,7 @@ function renderResults() {
   $('rangebar').hidden = false;
   lastShadow = agg.x.map((x, i) => [x, agg.series[keys[0]].val[i]]);
   rangeBar.update({ ...chartRange, start: zoomWin ? zoomWin.startMs : chartRange.min, end: zoomWin ? zoomWin.endMs : chartRange.max,
-    shadow: lastShadow, unit: state.agg });
+    shadow: lastShadow, unit: state.agg, now: wallMs(nowHour(), raw.tz) });
 
   $('model-used').textContent = modelUsedText(keys, rawWindow.S, rawWindow.E) + forecastText();
   placePendingLine();

@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=97';
-import { fmtWall, STEP_MS } from './data.js?v=97';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=100';
+import { fmtWall, STEP_MS } from './data.js?v=100';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -391,14 +391,21 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
     band('total range', s.cumLo, s.cumHi, dark, axes.cum, 0.12);
     const endVal = endIdx >= 0 ? s.cum[endIdx] : null;
     const totalVal = s.cum[totalIdx], totalLo = s.cumLo[totalIdx];
-    const d = decimals(s.unit);
-    const endText = endVal == null ? '' : `Total ${totalVal.toFixed(d)}`
-      + (totalLo != null ? ` (${totalLo.toFixed(d)}–${s.cumHi[totalIdx].toFixed(d)})` : '')
+    // From 1 cm on, millimetres are written as centimetres.
+    const inCm = s.unit === 'mm' && totalVal >= 10;
+    const unit = inCm ? 'cm' : s.unit, f = inCm ? 0.1 : 1;
+    const d = inCm ? (totalVal < 100 ? 2 : totalVal < 1000 ? 1 : 0) : decimals(s.unit);
+    const num = (val) => (val * f).toFixed(d);
+    const endText = endVal == null ? '' : `Total ${num(totalVal)} ${unit}`
+      + (totalLo != null ? ` (${num(totalLo)}–${num(s.cumHi[totalIdx])})` : '')
       + (fc[totalIdx] ? ' incl. forecast' : '');
+    // The line goes on to the point, at the end of its last bar (where the end mark sits), not its middle.
+    const pastLine = pastPts(s.cum), fcLine = fcLinePts(s.cum);
+    if (endVal != null && endX != null && endX > x[endIdx]) (fc[endIdx] ? fcLine : pastLine).splice(endIdx + 1, 0, [endX, endVal]);
     const total = { type: 'line', yAxisIndex: axes.cum, showSymbol: false, ...fast, z: 3, itemStyle: { color: dark } };
-    out.push({ ...total, name: `${v.label} – running total forecast`, data: fcLinePts(s.cum),
+    out.push({ ...total, name: `${v.label} – running total forecast`, data: fcLine,
       lineStyle: { color: dark, width: 2, type: 'dotted' } });
-    out.push({ ...total, name: `${v.label} – running total`, data: pastPts(s.cum),
+    out.push({ ...total, name: `${v.label} – running total`, data: pastLine,
       lineStyle: { color: dark, width: 1.5, type: 'dashed' },
       markPoint: endVal == null ? { data: [] } : {
         symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: dark },
