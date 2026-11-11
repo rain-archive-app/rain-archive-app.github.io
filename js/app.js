@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=96';
+} from './vars.js?v=97';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=96';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=96';
-import { createRangeBar } from './rangebar.js?v=96';
+} from './data.js?v=97';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=97';
+import { createRangeBar } from './rangebar.js?v=97';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1718,21 +1718,16 @@ function renderResults() {
 
   const agg = aggregate(raw, keys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;
-  // The bars "on screen" are those whose middle is inside the view: the running total starts at the
-  // first of them and its value is written at the last. With a date range or marks waiting on the
-  // chart, it runs between those instead, whatever the view: the same value is written where its
-  // line leaves the screen. A single mark goes with the period's other bound, as when it is applied.
+  // The running total is only drawn once its range is set: both marks on the chart, or the period
+  // fixed from the Period tab. It runs between them whatever the view, and its value is written at
+  // the last bar on screen of that range, or where its line leaves the screen.
   const vis = visibleBars(agg);
   const { start: markS, end: markE } = pendingMarks;
   let dates = totalsFixed ? barsBetween(agg, wallMs(rawWindow.S, raw.tz), wallMs(rawWindow.E, raw.tz)) : null;
-  if (markS != null || markE != null) {
-    const s = markS ?? wallMs(rawWindow.S, raw.tz), e = markE ?? wallMs(rawWindow.E, raw.tz);
-    dates = s < e ? barsBetween(agg, s, e) : markS != null ? barsBetween(agg, s, Infinity) : barsBetween(agg, -Infinity, e);
-  }
-  const from = dates ?? vis;
-  restartRunningTotals(agg, from, dates?.i1);
-  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, from ? from.i0 : 0);
-  let endIdx = vis ? vis.i1 : -1, totalIdx = endIdx;
+  if (markS != null && markE != null) dates = barsBetween(agg, markS, markE);
+  restartRunningTotals(agg, dates, dates?.i1);
+  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, dates ? dates.i0 : 0);
+  let endIdx = -1, totalIdx = -1;
   if (dates) {
     const seen = vis && vis.i0 <= dates.i1 && vis.i1 >= dates.i0;
     totalIdx = seen ? dates.i1 : -1;

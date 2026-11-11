@@ -1,7 +1,7 @@
 // ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=96';
-import { fmtWall, STEP_MS } from './data.js?v=96';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=97';
+import { fmtWall, STEP_MS } from './data.js?v=97';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -348,7 +348,7 @@ function describe(key, s, i, gran) {
   let t = fmtVal(s.val[i], s.unit);
   if (s.lo?.[i] != null) t += ` <span style="opacity:.75">(likely ${fmtVal(s.lo[i], s.unit)} – ${fmtVal(s.hi[i], s.unit)})</span>`;
   else if (v.kind === 'mean' && gran !== 'hour' && s.min[i] != null) t += ` <span style="opacity:.75">(${fmtVal(s.min[i], s.unit)} – ${fmtVal(s.max[i], s.unit)})</span>`;
-  if (s.cum) {
+  if (s.cum?.[i] != null) {
     t += ` <span style="opacity:.75">· total ${fmtVal(s.cum[i], s.unit)}`;
     if (s.cumLo?.[i] != null) t += ` (${fmtVal(s.cumLo[i], s.unit)} – ${fmtVal(s.cumHi[i], s.unit)})`;
     t += '</span>';
@@ -644,10 +644,12 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       // Each side only as wide as its numbers need, so the plot gets the rest.
       const fs = narrow ? 10 : 11;
       const left = axisRoom([s.val, s.lo, s.hi, s.min, s.max], opts.yScale?.[k], v.kind, fs);
-      const right = s.cum ? axisRoom([s.cum, s.cumLo, s.cumHi], null, 'sum', fs) : { side: 10 };
+      // No running total until its range is set: its axis is then hidden too.
+      const hasCum = s.cum?.some((c) => c != null);
+      const right = hasCum ? axisRoom([s.cum, s.cumLo, s.cumHi], null, 'sum', fs) : { side: 10 };
       const yAxes = [yAxis(unitName, v.kind, theme, 'left', 0, true, left.gap)];
       applyScale(yAxes[0], v.kind, opts.yScale?.[k]);
-      if (s.cum) yAxes.push(yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, right.gap));
+      if (s.cum) yAxes.push({ ...yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, right.gap ?? 0), show: hasCum });
       for (const ax of yAxes) {
         ax.axisLabel = { ...ax.axisLabel, fontSize: fs, margin: 5 };
         ax.nameTextStyle = { ...ax.nameTextStyle, fontSize: fs };
