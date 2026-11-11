@@ -1,13 +1,13 @@
 import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=92';
+} from './vars.js?v=96';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=92';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=92';
-import { createRangeBar } from './rangebar.js?v=92';
+} from './data.js?v=96';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=96';
+import { createRangeBar } from './rangebar.js?v=96';
 
 const $ = (id) => document.getElementById(id);
 
@@ -872,7 +872,7 @@ function renderModels() {
 
 let period = null;
 let axis = null;
-let pendingMarks = {}; // period marks waiting on the chart until they are applied: { start, end } (wall ms)
+let pendingMarks = {}; // marks on the chart, the range of the running totals: { start, end } (wall ms)
 let totalsFixed = false; // the running totals stay on the period, whatever the view (else they follow the view)
 
 function setStatus(msg, kind = '') {
@@ -1096,9 +1096,10 @@ function trimRaw() {
   const len = axis.E - axis.S;
   if (raw.loadedE - raw.loadedS <= 4 * len) return;
   const wb = wholeBars(axis); // never cut into a bar that is on screen
-  // A fixed period stays loaded whole: the running totals are computed over it, whatever the view.
-  const S = Math.max(raw.loadedS, Math.min(wb.S, axis.S - len, totalsFixed ? rawWindow.S : Infinity));
-  const E = Math.min(raw.loadedE, Math.max(wb.E, axis.E + len, totalsFixed ? rawWindow.E : -Infinity));
+  // A fixed period and the marks stay loaded whole: the running totals are computed over them, whatever the view.
+  const { start: ms, end: me } = pendingMarks;
+  const S = Math.max(raw.loadedS, Math.min(wb.S, axis.S - len, totalsFixed ? rawWindow.S : Infinity, ms != null ? unwall(ms) : Infinity));
+  const E = Math.min(raw.loadedE, Math.max(wb.E, axis.E + len, totalsFixed ? rawWindow.E : -Infinity, me != null ? unwall(me) : -Infinity));
   const idx = [];
   raw.times.forEach((t, i) => { if (t > S && t <= E) idx.push(i); });
   raw = { ...raw, times: idx.map((i) => raw.times[i]),
@@ -1326,16 +1327,14 @@ function showGuide(which, hit) {
   guide.hidden = false;
 }
 
-// Dropped marks only wait on the chart, so that nothing moves while they are placed and adjusted
-// (zooming and panning stay free). "Apply" uses both; with one mark, "Keep current…" applies it alone.
+// The marks hold the range of the totals as soon as they are placed, with nothing to confirm; they
+// stay on the chart to be adjusted, and the period itself is left as it is.
 const otherMark = (which) => (which === 'start' ? 'end' : 'start');
 let marksDrawn = 'undefined|undefined', marksFrame = 0;
 let drawingMarks = false; // the marks button is on and waits for clicks on the chart
 
 function showPendingMark() {
   const { start, end } = pendingMarks;
-  const both = start != null && end != null;
-  $('mark-pending').hidden = start == null && end == null;
   const on = drawingMarks || start != null || end != null;
   $('btn-marks').classList.toggle('on', on);
   $('btn-marks').setAttribute('aria-pressed', on);
@@ -1343,15 +1342,6 @@ function showPendingMark() {
     ? 'Click to remove the marks'
     : 'Set the range of the totals: click here, then click its start and its end on the chart';
   $('charts').classList.toggle('drawing-marks', drawingMarks);
-  if (both) {
-    $('mark-pending-text').textContent = `Period: ${markLabel(start)} → ${markLabel(end)} (${markDuration(end - start)}).`;
-    $('mark-keep').textContent = 'Apply';
-  } else if (!$('mark-pending').hidden) {
-    const which = start != null ? 'start' : 'end', other = otherMark(which);
-    $('mark-pending-text').textContent = `Period ${which}: ${markLabel(pendingMarks[which])}. Now click the ${other} on the chart.`;
-    $('mark-keep').textContent = `Keep current ${other}`;
-  }
-  $('mark-keep').classList.toggle('primary', both);
   placePendingLine();
   // The running totals follow the marks at once, redrawn at most once per frame.
   const key = `${start}|${end}`;
@@ -1419,7 +1409,7 @@ function placePendingLine() {
   link.classList.toggle('narrow', x2 - x1 < 64);
   $('mark-line-end').classList.toggle('low', x2 - x1 < 220);
 }
-addEventListener('scroll', () => { if (!$('mark-pending').hidden) placePendingLine(); }, true);
+addEventListener('scroll', () => { if (pendingMarks.start != null || pendingMarks.end != null) placePendingLine(); }, true);
 
 function clearPendingMark() {
   pendingMarks = {};
@@ -1440,8 +1430,6 @@ function dropMark(which, t) {
   showPendingMark();
 }
 
-$('mark-keep').onclick = () => applyMarks(pendingMarks);
-$('mark-cancel').onclick = clearPendingMark;
 
 // A handle follows the pointer horizontally; move(x, x0, marks) gets the pointer's position and
 // where it and the marks were when the drag began.
@@ -1552,35 +1540,6 @@ $('charts').addEventListener('contextmenu', (e) => {
 addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) closeMarkMenu(); }, true);
 for (const type of ['wheel', 'scroll', 'resize']) addEventListener(type, closeMarkMenu, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMarkMenu(); });
-
-// Dropped marks become the start and/or end of the saved period: the Period panel switches to
-// "Date range" with those bounds, a bound without mark is kept, and the data are reloaded.
-function applyMarks({ start, end }) {
-  clearPendingMark();
-  totalsFixed = true;
-  setStatus('');
-  const z = raw.tz;
-  let S = rawWindow.S, E = rawWindow.E;
-  const len = E - S;
-  if (start != null && end != null) {
-    S = unwall(Math.min(start, end)); // dropped the wrong way round: the earlier one is the start
-    E = unwall(Math.max(start, end));
-  } else if (start != null) {
-    S = unwall(start);
-    if (E - S < HOUR) E = S + len; // dropped after the end: keep the length
-  } else {
-    E = unwall(end);
-    if (E - S < HOUR) S = E - len;
-  }
-  Object.assign(state, {
-    otherMode: 'range',
-    rangeStart: unixToZonedInput(Math.max(MIN_DATE, S), z),
-    rangeEnd: unixToZonedInput(Math.min(lastHour(), E), z),
-  });
-  save();
-  syncPeriodUI();
-  scheduleFetch(0);
-}
 
 // The marks button: on, the next two clicks on the chart set the start, then the end (the wrong way
 // round is swapped). It stays on while marks are there; clicking it then removes them and turns it off.
@@ -1832,7 +1791,7 @@ async function showWindow(win) {
   renderResults();
   setActiveView(null);
 }
-// The range of the totals (wall ms): the marks waiting on the chart, or else the period.
+// The range of the totals (wall ms): the marks on the chart, or else the period.
 function totalsRange() {
   const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz);
   const a = pendingMarks.start ?? S, z = pendingMarks.end ?? E;

@@ -192,14 +192,14 @@ details.sub > summary { font-weight: 400; }
 .row-head svg .fill { fill: currentColor; stroke: none; }
 .swap {
   grid-row: 1 / span 2; align-self: stretch; width: 14px; padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 45%, var(--card)); /* light blue (#a5c5ed on white), full blue on hover */
 }
+.swap:hover { color: var(--accent); }
 .swap svg { overflow: visible; }
 .swap.left { grid-column: 1; }
 .swap.right { grid-column: 3; margin-right: 4px; }
 .swap svg { width: 14px; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .swap svg .head { fill: currentColor; }
-.swap:hover svg { stroke-width: 2.6; }
 .swap:disabled { opacity: .3; cursor: default; }
 .view-btns .btn.small { padding: 2px; font-size: 11.5px; min-width: 24px; }
 .view-btns { gap: 2px; }
@@ -282,9 +282,6 @@ details.sub > summary { font-weight: 400; }
 }
 .mark-menu button:hover { background: var(--chart-grid); }
 /* First mark dropped: what it is, and the second mark to drop next. */
-.mark-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 14px; }
-.mark-pending[hidden] { display: none; }
-.mark-pending span { flex: 1 1 200px; }
 
 /* Combine / full-screen / refresh icons sit at the top right of the charts. */
 .charts-wrap { position: relative; }
@@ -370,4 +367,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=92"); }
+  background-image: url("../icons/mapbox-logo.svg?v=96"); }

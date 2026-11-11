@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=92">
+  <link rel="stylesheet" href="css/app.css?v=96">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=92"></script>
+  <script type="module" src="js/app.js?v=96"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -170,7 +170,7 @@
           <button type="button" class="btn small" data-view="8760">1 y</button>
           <span class="row-head total-head" title="These buttons set the range of the totals">
             <!-- The chart's line over a range |↔| -->
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.4 20.35 9.4 15.87l5.23 2.69 4.33-1.68 6.93-10.97"/><path class="thin" d="M4.96 3.66v17.78M20.96 3.66v17.78M8.8 12.33h8"/><path class="fill" d="M5.7 12.33 8.8 10.5v3.66zM19.9 12.33 16.8 10.5v3.66z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.4 20.35 9.4 15.87l5.23 2.69 4.33-1.68 6.93-10.97"/><path class="thin" d="M4.96 3.66v17.78M20.96 3.66v17.78M11.99 9.67h1.57"/><path class="fill" d="M5.99 9.67 11.99 6.27v6.8zM19.57 9.67 13.56 6.27v6.8z"/></svg>
           </span>
           <button type="button" class="btn small icon" data-total="period" title="Totals over the date-defined period: shows the marks" aria-label="Totals over the date-defined period">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
@@ -200,11 +200,6 @@
         </div>
       </div>
       <div id="status" class="status" role="status"></div>
-      <div id="mark-pending" class="mark-pending" hidden>
-        <span id="mark-pending-text"></span>
-        <button type="button" id="mark-keep" class="btn small"></button>
-        <button type="button" id="mark-cancel" class="btn small">Cancel</button>
-      </div>
       <div class="charts-wrap">
         <div class="chart-tools">
           <button type="button" id="btn-chart-mode" class="btn icon" aria-pressed="false" title="Combine charts" aria-label="Combine charts" hidden>
