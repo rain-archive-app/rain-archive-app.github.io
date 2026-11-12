@@ -1,13 +1,13 @@
-import {
+﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=100';
+} from './vars.js?v=101';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=100';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=100';
-import { createRangeBar } from './rangebar.js?v=100';
+} from './data.js?v=101';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=101';
+import { createRangeBar } from './rangebar.js?v=101';
 
 const $ = (id) => document.getElementById(id);
 
@@ -578,9 +578,13 @@ function openMap(opts = {}) {
   map.setView(c, center ? 10 : 6);
   picked = null;
   if (marker) { marker.remove(); marker = null; }
-  $('map-picked').textContent = 'No point selected.';
-  $('map-use').disabled = true;
-  updateStar();
+  // The current place (or the favorite being moved) is already pinned and selected.
+  if (center) pickPoint(center.lat, center.lon);
+  else {
+    $('map-picked').textContent = 'No point selected.';
+    $('map-use').disabled = true;
+    updateStar();
+  }
   setTimeout(() => map.invalidateSize(), 50);
 }
 $('btn-map').onclick = () => openMap();
