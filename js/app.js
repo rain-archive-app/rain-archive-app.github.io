@@ -1,13 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=101';
+} from './vars.js?v=102';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=101';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=101';
-import { createRangeBar } from './rangebar.js?v=101';
+} from './data.js?v=102';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=102';
+import { createRangeBar } from './rangebar.js?v=102';
+import { initAccount, pushFavorites } from './account.js?v=102';
 
 const $ = (id) => document.getElementById(id);
 
@@ -212,11 +213,13 @@ async function copyCoords(lat, lon) {
 const sameLoc = (a, b) => a && b && Math.abs(a.lat - b.lat) < 1e-3 && Math.abs(a.lon - b.lon) < 1e-3;
 const isFavorite = (loc) => state.favorites.some((f) => sameLoc(f, loc));
 const favAt = (loc) => state.favorites.find((f) => sameLoc(f, loc));
-function setFavorites(list) {
+// fromCloud: the list comes from the online account (another device), so it is not sent back.
+function setFavorites(list, fromCloud = false) {
   state.favorites = list;
   save();
   renderLocation();
   refreshMapFavorites();
+  if (!fromCloud) pushFavorites(list);
 }
 
 // ---------- Favorites ----------
@@ -1893,6 +1896,13 @@ renderUnits();
 renderModels();
 updateTabs();
 scheduleFetch(0);
+initAccount({
+  box: $('account'),
+  getFavorites: () => state.favorites,
+  onRemote: (list) => setFavorites(list, true),
+  same: sameLoc,
+  toast,
+});
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));

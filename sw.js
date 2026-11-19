@@ -1,7 +1,7 @@
 ﻿// Service worker: cache the app shell and CDN libraries; weather/geocoding APIs always go to the network.
 // Bump VERSION together with the ?v= tags in index.html and the js imports.
-const VERSION = 'rain-archive-v101';
-const V = '?v=101';
+const VERSION = 'rain-archive-v102';
+const V = '?v=102';
 const SHELL = [
   './',
   'index.html',
@@ -11,12 +11,13 @@ const SHELL = [
   `js/data.js${V}`,
   `js/charts.js${V}`,
   `js/rangebar.js${V}`,
+  `js/account.js${V}`,
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
 ];
-const CDN_HOSTS = ['cdn.jsdelivr.net'];
+const CDN_HOSTS = ['cdn.jsdelivr.net', 'www.gstatic.com']; // gstatic: the pinned Firebase SDK
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

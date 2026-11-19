@@ -147,6 +147,11 @@ input:disabled { opacity: .55; }
 .loc-info strong { color: var(--text); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.account { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.account-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.account-line .btn.mini { margin-left: 0; }
+.account .btn.danger { color: var(--danger); }
+.account-note { margin-top: 6px; font-size: 11px; }
 .chip {
   display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px;
   background: var(--bg); font-size: 13px; overflow: hidden;
@@ -368,4 +373,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=101"); }
+  background-image: url("../icons/mapbox-logo.svg?v=102"); }

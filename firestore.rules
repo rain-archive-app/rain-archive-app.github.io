@@ -1,0 +1,14 @@
+rules_version = '2';
+// Rain Archive: each signed-in user can read and write only their own document users/{uid},
+// which holds only their favorites. Everything else is refused.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['favorites', 'updated'])
+        && request.resource.data.favorites is list
+        && request.resource.data.favorites.size() <= 500;
+    }
+  }
+}
