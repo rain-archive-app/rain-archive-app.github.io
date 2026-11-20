@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=108">
+  <link rel="stylesheet" href="css/app.css?v=111">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=108"></script>
+  <script type="module" src="js/app.js?v=111"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -24,9 +24,6 @@
     <nav class="tabs" aria-label="Settings">
       <button type="button" class="tab" data-panel="card-location" aria-expanded="false">
         <span class="tab-name">📍 Location</span><span class="tab-val" id="tab-location">–</span>
-      </button>
-      <button type="button" class="tab" data-panel="card-period" aria-expanded="false">
-        <span class="tab-name"><svg class="ico-period" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Period</span><span class="tab-val" id="tab-period">–</span>
       </button>
       <button type="button" class="tab" data-panel="card-data" aria-expanded="false">
         <span class="tab-name">📊 Data</span><span class="tab-val" id="tab-data">–</span>
@@ -95,8 +92,7 @@
     </div>
     <p id="period-summary" class="muted small"></p>
     <div class="period-confirm">
-      <button type="button" id="period-fit-view" class="btn">Fit view</button>
-      <button type="button" id="period-fit-total" class="btn primary">Fit totals and view</button>
+      <button type="button" id="period-apply" class="btn primary" title="Totals over this period, view centred on it">Apply</button>
     </div>
   </section>
 
@@ -145,11 +141,8 @@
       <div class="toolbar">
         <div id="view-btns" class="view-btns" role="group" aria-label="Chart time window and range of the totals" hidden>
           <!-- Targets: the buttons after them act on the view (eye), on the range of the totals (chart), or both -->
-          <!-- Above, from the chart icon to the eye: the view takes the totals. Below, from the eye to the chart icon: the totals take the view. -->
           <div class="tgt-group">
-            <button type="button" class="swap top off" id="btn-view-totals" title="View = totals: the view covers the range of the totals (120 %)" aria-label="View over the range of the totals">
-              <svg viewBox="0 0 64 14" aria-hidden="true"><path d="M50 12C42 2 22 2 15 10.5"/><path class="head" d="M13.4 12.8 19 9.7 15.2 6.5z"/></svg>
-            </button>
+            <span class="tgt-label">Act on:</span>
             <button type="button" class="btn small icon target" id="tgt-view" aria-pressed="true" title="The buttons move the view (click to switch off)" aria-label="Buttons act on the view">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -157,24 +150,21 @@
               <!-- The chart's line over a range |↔| -->
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.4 20.35 9.4 15.87l5.23 2.69 4.33-1.68 6.93-10.97"/><path class="thin" d="M4.96 3.66v17.78M20.96 3.66v17.78M11.99 9.67h1.57"/><path class="fill" d="M5.99 9.67 11.99 6.27v6.8zM19.57 9.67 13.56 6.27v6.8z"/></svg>
             </button>
-            <button type="button" class="swap bottom off" id="btn-totals-view" title="Totals = view: the range of the totals takes the middle of the view" aria-label="Totals over the current view">
-              <svg viewBox="0 0 64 14" aria-hidden="true"><path d="M14 2C22 12 42 12 49 3.5"/><path class="head" d="M50.6 1.2 48.9 7.5 45 4.4z"/></svg>
-            </button>
           </div>
-          <button type="button" class="btn small icon" data-view="period" title="Date-defined period" aria-label="Date-defined period">
+          <button type="button" class="btn small icon" id="btn-period" aria-expanded="false" aria-controls="card-period" title="Period" aria-label="Period">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
           </button>
           <button type="button" class="btn small icon" data-view="now" title="Now: centre on the present" aria-label="Now">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="M12 7.5 16.5 12 12 16.5"/><path d="M20.5 4v16"/></svg>
-          </button>
-          <button type="button" id="btn-center-view" class="btn small icon" title="Center" aria-label="Center">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M1 12h4.5M3.5 9.5 6 12l-2.5 2.5M23 12h-4.5M20.5 9.5 18 12l2.5 2.5"/></svg>
           </button>
           <button type="button" class="btn small" data-view="24">1 d</button>
           <button type="button" class="btn small" data-view="72">3 d</button>
           <button type="button" class="btn small" data-view="168">1 w</button>
           <button type="button" class="btn small" data-view="720">1 m</button>
           <button type="button" class="btn small" data-view="8760">1 y</button>
+          <button type="button" id="btn-center-view" class="btn small icon" title="Center" aria-label="Center">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M1 12h4.5M3.5 9.5 6 12l-2.5 2.5M23 12h-4.5M20.5 9.5 18 12l2.5 2.5"/></svg>
+          </button>
           <!-- Marks: click it, then click the chart twice (start, then end); click it again to remove them -->
           <button type="button" id="btn-marks" class="btn small icon mark" title="Set the range of the totals: click here, then click its start and its end on the chart" aria-label="Set the range of the totals on the chart" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5v14M21 5v14"/><path d="M7 12h10"/><path d="M9.5 9.5 7 12l2.5 2.5M14.5 9.5 17 12l-2.5 2.5"/></svg>

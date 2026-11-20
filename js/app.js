@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=108';
+} from './vars.js?v=111';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=108';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=108';
-import { createRangeBar } from './rangebar.js?v=108';
-import { initAccount, pushFavorites } from './account.js?v=108';
+} from './data.js?v=111';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=111';
+import { createRangeBar } from './rangebar.js?v=111';
+import { initAccount, pushFavorites } from './account.js?v=111';
 
 const $ = (id) => document.getElementById(id);
 
@@ -107,11 +107,11 @@ const tabs = [...document.querySelectorAll('.tab')];
 function openPanel(id) {
   if (!$('card-period').hidden && id !== 'card-period') restorePeriod(); // left without confirming
   document.documentElement.style.setProperty('--header-h', `${Math.round($('topbar').getBoundingClientRect().bottom)}px`);
-  for (const t of tabs) {
-    const on = t.dataset.panel === id;
-    t.setAttribute('aria-expanded', on);
-    $(t.dataset.panel).hidden = !on;
-  }
+  for (const t of tabs) t.setAttribute('aria-expanded', t.dataset.panel === id);
+  document.querySelectorAll('section.panel').forEach((p) => { p.hidden = p.id !== id; });
+  // The period panel has no tab: the calendar button of the chart toolbar opens it.
+  $('btn-period').setAttribute('aria-expanded', id === 'card-period');
+  $('btn-period').classList.toggle('active', id === 'card-period');
   $('panel-backdrop').hidden = !id;
 }
 tabs.forEach((t) => {
@@ -134,7 +134,7 @@ function updateTabs() {
       ? `${dur} → ${fmtWall(wallMs(w.E, z), false).slice(4)}`
       : `${fmtWall(wallMs(w.S, z), false, !sameYear).slice(4)} → ${fmtWall(wallMs(w.E, z), false).slice(4)}`;
   }
-  $('tab-period').textContent = p;
+  $('btn-period').title = `Period: ${p}`;
   const first = state.vars[0] ? VAR_BY_KEY[state.vars[0]].label : 'None';
   const aggTxt = { hour: 'per hour', day: 'per day', week: 'per week', month: 'per month', year: 'per year' }[state.agg];
   $('tab-data').textContent = `${first}${state.vars.length > 1 ? ` +${state.vars.length - 1}` : ''} · ${aggTxt}`;
@@ -658,7 +658,7 @@ function renderPeriodSummary() {
   updateTabs();
   const w = computeWindow();
   const el = $('period-summary');
-  $('period-fit-view').disabled = $('period-fit-total').disabled = !!w.error;
+  $('period-apply').disabled = !!w.error;
   if (w.error) { el.textContent = w.error; return; }
   const z = tz();
   el.textContent = `${fmtWall(wallMs(w.S, z))} → ${fmtWall(wallMs(w.E, z))} · ${fmtDuration(Math.round((w.E - w.S) / HOUR))} · ${z}` +
@@ -732,22 +732,17 @@ $('qty-unit').onchange = (e) => { state.qtyUnit = e.target.value; onPeriodChange
 $('range-start').onchange = (e) => { state.rangeStart = e.target.value; onPeriodChange(); };
 $('range-end').onchange = (e) => { state.rangeEnd = e.target.value; onPeriodChange(); };
 
-// "Fit totals and view": these dates become the period, over which the running totals then stay.
-function fitTotalsAndView() {
-  totalsFixed = true;
-  clearPendingMark();
+// The calendar button of the toolbar opens and closes the period panel.
+$('btn-period').onclick = () => openPanel($('card-period').hidden ? 'card-period' : null);
+// "Apply": these dates become the period; once loaded, the totals run over it and the view shows it
+// with 5 % on each side (see doFetch).
+let periodToApply = false;
+$('period-apply').onclick = () => {
+  if (computeWindow().error) return;
   appliedPeriod = periodFields();
+  periodToApply = true;
   openPanel(null);
   scheduleFetch(0);
-}
-$('period-fit-total').onclick = () => { if (!computeWindow().error) fitTotalsAndView(); };
-// "Fit view": the chart shows these dates; the period and its totals stay as they were.
-$('period-fit-view').onclick = () => {
-  const w = computeWindow();
-  if (w.error) return;
-  if (!raw || !zoomWin) { fitTotalsAndView(); return; } // nothing on screen yet to keep
-  openPanel(null);
-  showWindow({ startMs: wallMs(w.S, raw.tz), endMs: wallMs(w.E, raw.tz) });
 };
 
 // ---------- Variables ----------
@@ -957,7 +952,8 @@ async function doFetch() {
     zoomWin = viewWindow('period');
     renderResults();
     setActiveView('period');
-    if (state.otherMode === 'end' && state.endNow) await startAtNow(); // now in the middle, totals over the last day
+    if (periodToApply) { periodToApply = false; await fitPeriod(); } // totals over the period, view 110 %
+    else if (state.otherMode === 'end' && state.endNow) await startAtNow(); // now in the middle, totals over the last day
     fillAxis(); // the margins, in the background
     refreshScales();
   } catch (e) {
@@ -1168,7 +1164,6 @@ function onChartZoom(z) {
   rangeBar.update({ start: z.startMs, end: z.endMs });
   placePendingLine();
   closeMarkMenu();
-  syncArrows();
   const own = snapped && Math.abs(z.startMs - snapped.startMs) < 1e3 && Math.abs(z.endMs - snapped.endMs) < 1e3;
   if (own) return; // relayout is already running
   snapped = null;
@@ -1350,7 +1345,6 @@ function showPendingMark() {
     : 'Set the range of the totals: click here, then click its start and its end on the chart';
   $('charts').classList.toggle('drawing-marks', drawingMarks);
   placePendingLine();
-  syncArrows();
   // The running totals follow the marks at once, redrawn at most once per frame.
   const key = `${start}|${end}`;
   if (key !== marksDrawn) {
@@ -1799,12 +1793,13 @@ function totalsRange() {
 }
 // ---------- Toolbar targets ----------
 // The eye and the chart icon choose what the buttons after them act on: the view, the range of the
-// totals, or both (the default at each opening). At least one stays on. With both on, the view
+// totals, or both (the default at each opening). With both off, the buttons are greyed out. With both on, the view
 // covers 120 % of the new range of the totals, around it.
 const targets = { view: true, totals: true };
 const HOUR_MS = 3600e3;
 const hasSumVar = () => state.vars.some((k) => VAR_BY_KEY[k]?.kind === 'sum');
 const hasTotals = () => totalsFixed || (pendingMarks.start != null && pendingMarks.end != null);
+const noTarget = () => !targets.view && !(targets.totals && hasSumVar());
 
 function syncTargets() {
   const sum = hasSumVar();
@@ -1814,32 +1809,17 @@ function syncTargets() {
   const V = targets.view, T = targets.totals && sum;
   // The view alone can only be centred on totals that exist.
   $('btn-center-view').disabled = !T && !(V && sum && hasTotals());
+  document.querySelectorAll('#view-btns button[data-view]').forEach((b) => { b.disabled = !V && !T; });
   $('btn-center-view').title = T ? 'Center the range of the totals on the view, same length'
     : 'Center the view on the range of the totals, same width';
-  syncArrows();
-}
-
-// View and totals are "together" after a button acted on both (or an arrow); moving either one on the
-// chart, the time bar or the marks sets them apart, and only then do the round arrows show.
-let linkSig = null;
-function viewTotalsSig() {
-  if (!raw || !rawWindow || !zoomWin || !hasTotals()) return null;
-  return [zoomWin.startMs, zoomWin.endMs, ...totalsRange()].join('|');
-}
-function linkTogether() { linkSig = viewTotalsSig(); syncArrows(); }
-function syncArrows() {
-  const sig = viewTotalsSig();
-  const apart = hasSumVar() && sig != null && sig !== linkSig;
-  for (const id of ['btn-view-totals', 'btn-totals-view']) {
-    $(id).classList.toggle('off', !apart);
-    $(id).disabled = !apart;
-  }
 }
 for (const [id, key, other] of [['tgt-view', 'view', 'totals'], ['tgt-totals', 'totals', 'view']]) {
   $(id).onclick = () => {
     targets[key] = !targets[key];
-    if (!targets[key] && !(targets[other] && (other === 'view' || hasSumVar()))) targets[other] = true; // never both off
     syncTargets();
+    // Both off: the action buttons are greyed out until one of the two is chosen again.
+    if (noTarget()) setStatus('Choose what the buttons act on: the view (eye), the totals (chart), or both.', 'error');
+    else if ($('status').textContent.startsWith('Choose what the buttons act on')) setStatus('');
   };
 }
 
@@ -1858,12 +1838,7 @@ function nowWindow(len) {
 }
 
 // Sets the range of the totals (tot: [start, end] wall ms) and/or the view (win), then highlights `active`.
-// link: the view and the totals are set together (both targets on, an arrow, the opening).
-async function setTargets(tot, win, active, link = false) {
-  await moveTargets(tot, win, active);
-  if (link) linkTogether(); else syncArrows();
-}
-async function moveTargets(tot, win, active) {
+async function setTargets(tot, win, active) {
   if (tot) {
     pendingMarks = { start: tot[0], end: tot[1] };
     if (!win) { await placeMarks(tot[0], tot[1]); setActiveView(active); return; }
@@ -1883,12 +1858,6 @@ async function toolbarAction(kind) {
   const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz), now = wallMs(nowHour(), raw.tz);
   const span = zoomWin.endMs - zoomWin.startMs, mid = (zoomWin.startMs + zoomWin.endMs) / 2;
   const around = (t) => windowAround((t[0] + t[1]) / 2, (t[1] - t[0]) * 1.2);
-  const L = V && T; // both targets: the view and the totals end up together
-  if (kind === 'period') {
-    if (!T) return applyView('period');
-    const tot = [S, E];
-    return setTargets(tot, V ? around(tot) : null, 'period', L);
-  }
   if (kind === 'now') {
     // Both centred on now, each keeping its length (the totals: one day if there are none yet).
     let tot = null;
@@ -1897,7 +1866,7 @@ async function toolbarAction(kind) {
       const a = Math.min(snapMark(now - len / 2), snapMark(endMax() - len));
       tot = [a, snapMark(a + len)];
     }
-    return setTargets(tot, V ? nowWindow(span) : null, 'now', L);
+    return setTargets(tot, V ? nowWindow(span) : null, 'now');
   }
   if (kind === 'center') {
     if (T) {
@@ -1922,33 +1891,27 @@ async function toolbarAction(kind) {
   let a = snapMark(mid - len / 2);
   a = Math.min(a, snapMark(endMax() - len));
   const tot = [a, a + len];
-  return setTargets(tot, V ? windowAround(mid, len * 1.2) : null, kind, L);
+  return setTargets(tot, V ? windowAround(mid, len * 1.2) : null, kind);
 }
 document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
   b.onclick = () => toolbarAction(b.dataset.view);
 });
 $('btn-center-view').onclick = () => toolbarAction('center');
-// Round arrows: bring the view and the totals back together after moving one of them on the chart,
-// in the same proportion as the toolbar buttons (the view covers 120 % of the totals, around them).
-$('btn-view-totals').onclick = () => {
-  if (!raw || !zoomWin) return;
-  const [a, z] = totalsRange();
-  setTargets(null, windowAround((a + z) / 2, (z - a) * 1.2), null, true);
-};
-$('btn-totals-view').onclick = () => {
-  if (!raw || !zoomWin) return;
-  const mid = (zoomWin.startMs + zoomWin.endMs) / 2, len = (zoomWin.endMs - zoomWin.startMs) / 1.2;
-  const a = snapMark(mid - len / 2), z = snapMark(mid + len / 2);
-  if (z > a) setTargets([a, z], null, null, true);
-};
 
+// After "Apply" in the period panel: the totals over the period, the view over 110 % of it, around it.
+async function fitPeriod() {
+  const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz);
+  const len = E - S, mid = (S + E) / 2;
+  const win = { startMs: roundH(mid - len * 0.55), endMs: roundH(mid + len * 0.55) };
+  await setTargets(hasSumVar() ? [S, E] : null, win, null);
+}
 // At the opening of a period that ends now: the view keeps the period's length with now in its
 // middle, and the totals run over the last day.
 async function startAtNow() {
   const now = wallMs(nowHour(), raw.tz);
   const len = wallMs(rawWindow.E, raw.tz) - wallMs(rawWindow.S, raw.tz);
   const tot = hasSumVar() ? [snapMark(now - 24 * HOUR_MS), snapMark(now)] : null;
-  await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null, true);
+  await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null);
 }
 // Clicking a variable's title removes it, unless it is the last one.
 $('charts').addEventListener('click', (e) => {
