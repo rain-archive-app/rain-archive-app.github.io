@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=112';
+} from './vars.js?v=116';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=112';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=112';
-import { createRangeBar } from './rangebar.js?v=112';
-import { initAccount, pushFavorites } from './account.js?v=112';
+} from './data.js?v=116';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=116';
+import { createRangeBar } from './rangebar.js?v=116';
+import { initAccount, pushFavorites } from './account.js?v=116';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1135,7 +1135,12 @@ async function relayout() {
     return;
   }
   const want = axisAround(vS, vE);
-  await queue(() => ensureData(wholeBars(want)));
+  // The next stretch is being downloaded: say so, or the bar seems stuck at its edge meanwhile.
+  const need = wholeBars(want);
+  const loading = need.S < raw.loadedS || Math.min(lastHour(), need.E) > raw.loadedE;
+  if (loading) setStatus('Loading data…', 'loading');
+  await queue(() => ensureData(need));
+  if (loading && $('status').textContent === 'Loading data…') setStatus('');
   if (!raw) return;
   axis = want;
   trimRaw();

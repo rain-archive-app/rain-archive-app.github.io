@@ -353,7 +353,7 @@ details.sub > summary { font-weight: 400; }
 .chart-title .name { font-weight: 600; }
 /* Eye (show / hide the chart) and bin (remove), after the name, when there are several variables. */
 .var-tool { width: 22px; height: 22px; padding: 0; margin-left: 2px; border: 0; background: none; cursor: pointer;
-  color: var(--muted); display: inline-grid; place-items: center; vertical-align: -5px; border-radius: 6px; }
+  color: color-mix(in srgb, var(--muted) 60%, var(--card)); display: inline-grid; place-items: center; vertical-align: -5px; border-radius: 6px; }
 .var-tool:first-of-type { margin-left: 8px; }
 .var-tool:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
 .var-tool.var-del:hover { color: var(--danger); }
@@ -382,4 +382,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=112"); }
+  background-image: url("../icons/mapbox-logo.svg?v=116"); }

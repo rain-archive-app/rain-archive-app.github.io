@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=112';
-import { fmtWall, STEP_MS } from './data.js?v=112';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=116';
+import { fmtWall, STEP_MS } from './data.js?v=116';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -162,12 +162,25 @@ function xAxes(theme, gran) {
 }
 
 // Called after each zoom/pan: recompute the ticks of the new visible part (and their spacing).
+// Each setOption makes ECharts go through all the series again (up to 0.4 s per chart for a year of
+// hourly data), so nothing is redone while the view moves: the ticks follow once it has stood still
+// for a moment, and not at all when the app has meanwhile redrawn the charts with the same ticks.
+let labelTimer = 0, labelSig = '';
+const axesSig = (xAxis) => [tickUnit.join(), topShown, ...xAxis.map((a) => a.axisLabel.customValues?.join(',') ?? '')].join('|');
 function refreshLabels(chart, startMs, endMs, gran, theme) {
   view.s = startMs; view.e = endMs;
-  tickUnit = unitFor(endMs - startMs);
-  topShown = topFor(endMs - startMs);
+  clearTimeout(labelTimer);
+  labelTimer = setTimeout(() => applyLabels(gran, theme), 450);
+}
+function applyLabels(gran, theme) {
+  tickUnit = unitFor(view.e - view.s);
+  topShown = topFor(view.e - view.s);
+  const xAxis = xAxes(theme, gran);
+  const sig = axesSig(xAxis);
+  if (sig === labelSig) return;
+  labelSig = sig;
   const grid = { top: topShown ? GRID_TOP.on : GRID_TOP.off };
-  for (const c of instances) c.setOption({ xAxis: xAxes(theme, gran), grid });
+  for (const c of instances) c.setOption({ xAxis, grid });
 }
 
 // ---------- Touch gestures ----------
@@ -177,6 +190,11 @@ function refreshLabels(chart, startMs, endMs, gran, theme) {
  * pinching them (beyond the tolerance) zooms around their midpoint. One finger is left to
  * ECharts, which shows the tooltip under the finger as a tap would.
  */
+// Visible part of the time axis, in % ({start, end}), read from the model: getOption() would copy all the data.
+function zoomPct(chart) {
+  const [start, end] = chart.getModel().getComponent('dataZoom', 0).getPercentRange();
+  return { start, end };
+}
 function attachTouch(chart, el) {
   let g = null;
   const mid = (t) => (t[0].clientX + t[1].clientX) / 2;
@@ -184,7 +202,7 @@ function attachTouch(chart, el) {
   el.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 2) { g = null; return; }
     const { min, max } = chartRange;
-    const dz = chart.getOption().dataZoom[0];
+    const dz = zoomPct(chart);
     const rect = chart.getModel().getComponent('grid').coordinateSystem.getRect();
     const box = el.getBoundingClientRect();
     g = {
@@ -260,6 +278,7 @@ function titleEl(key, color, t = {}) {
 export function disposeCharts() {
   instances.forEach((c) => c.dispose());
   instances = [];
+  labelSpecs = [];
   current = null;
 }
 
@@ -291,27 +310,39 @@ function halfTransparent(color) {
 // already placed moves down below it (or up above it when there is no room left below).
 function labelWidth(text) {
   measureCtx ??= document.createElement('canvas').getContext('2d');
-  measureCtx.font = `700 ${TOTAL_FS}px ${getComputedStyle(document.body).fontFamily}`;
+  labelFont ??= `700 ${TOTAL_FS}px ${getComputedStyle(document.body).fontFamily}`;
+  measureCtx.font = labelFont;
   return measureCtx.measureText(text).width + 6;
+}
+let labelFont = null;
+// The "Total" / "Mean" labels of each chart, noted when the charts are drawn ({ i: series index,
+// coord, yAxisIndex, w: width, pos, off }), so that nothing has to read the charts' whole options
+// back (chart.getOption() copies all the data: far too slow to do while dragging).
+let labelSpecs = [];
+function noteLabels(charts) {
+  labelSpecs = charts.map((c) => ({ count: c.opt.series.length, items: c.opt.series.map((s, i) => {
+    const coord = s.markPoint?.data?.[0]?.coord;
+    if (!coord) return null;
+    return { i, coord, yAxisIndex: s.yAxisIndex ?? 0, w: labelWidth(s.markPoint.label.formatter()), pos: 'top', off: 0 };
+  }).filter(Boolean) }));
 }
 function placeTotalLabels() {
   const bg = halfTransparent(css('--card'));
-  for (const chart of instances) {
-    const o = chart.getOption();
+  instances.forEach((chart, n) => {
+    const spec = labelSpecs[n];
+    if (!spec?.items.length) return;
     const rect = chart.getModel().getComponent('grid')?.coordinateSystem?.getRect();
-    if (!rect) continue;
+    if (!rect) return;
     const items = [];
-    o.series.forEach((s, i) => {
-      const coord = s.markPoint?.data?.[0]?.coord;
-      if (!coord) return;
-      // Measured on the running total's own y axis (the right-hand Σ axis), not the first one.
-      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: s.yAxisIndex ?? 0 }, coord) ?? [];
+    spec.items.forEach((sp) => {
+      // Measured on the label's own y axis (the right-hand Σ axis for totals), not the first one.
+      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: sp.yAxisIndex }, sp.coord) ?? [];
       if (py == null || Number.isNaN(py)) return;
       const roomAbove = py - 4 - LABEL_H >= rect.y;
       const roomBelow = py + 4 + LABEL_H <= rect.y + rect.height;
       const below = !roomAbove && roomBelow;
       const top = below ? py + 4 : py - 4 - LABEL_H;
-      items.push({ i, s, below, top, top0: top, left: px - labelWidth(s.markPoint.label.formatter()), right: px });
+      items.push({ i: sp.i, sp, below, top, top0: top, left: px - sp.w, right: px });
     });
     // Highest first; each one goes clear of those already placed that it overlaps.
     items.sort((a, b) => a.top - b.top);
@@ -325,40 +356,37 @@ function placeTotalLabels() {
       placed.push(it);
     }
     let changed = false;
-    const series = o.series.map((s, i) => {
+    const series = Array.from({ length: spec.count }, (_, i) => {
       const it = items.find((x) => x.i === i);
       if (!it) return {};
       const offset = [0, Math.round(it.top - it.top0)];
-      const l = s.markPoint.label;
       const want = it.below ? 'bottom' : 'top';
-      if (l?.position === want && (l.offset?.[1] ?? 0) === offset[1]) return {};
+      if (it.sp.pos === want && it.sp.off === offset[1] && !it.sp.fresh) return {};
+      it.sp.pos = want; it.sp.off = offset[1]; it.sp.fresh = false;
       changed = true;
       return { markPoint: { label: it.below || offset[1]
         ? { position: want, offset, backgroundColor: bg, padding: [1, 3], borderRadius: 3 }
         : { position: want, offset, backgroundColor: 'transparent', padding: 0 } } };
     });
     if (changed) chart.setOption({ series });
-  }
+  });
 }
 
 // Where the "Total …" labels are on screen (client pixels), so the marks' handles can keep clear of them.
 let measureCtx = null;
 export function totalLabelBoxes() {
-  measureCtx ??= document.createElement('canvas').getContext('2d');
-  measureCtx.font = `700 ${TOTAL_FS}px ${getComputedStyle(document.body).fontFamily}`;
   const boxes = [];
-  for (const chart of instances) {
+  instances.forEach((chart, n) => {
+    const items = labelSpecs[n]?.items;
+    if (!items?.length) return;
     const dom = chart.getDom().getBoundingClientRect();
-    for (const s of chart.getOption().series) {
-      const mp = s.markPoint, coord = mp?.data?.[0]?.coord;
-      if (!coord) continue;
-      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: s.yAxisIndex ?? 0 }, coord) ?? [];
+    for (const sp of items) {
+      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: sp.yAxisIndex }, sp.coord) ?? [];
       if (py == null || Number.isNaN(py)) continue;
-      const w = measureCtx.measureText(mp.label.formatter()).width + 6;
-      const top = (mp.label.position === 'bottom' ? py + 4 : py - 4 - LABEL_H) + (mp.label.offset?.[1] ?? 0);
-      boxes.push({ left: dom.left + px - w, right: dom.left + px, top: dom.top + top, bottom: dom.top + top + LABEL_H });
+      const top = (sp.pos === 'bottom' ? py + 4 : py - 4 - LABEL_H) + sp.off;
+      boxes.push({ left: dom.left + px - sp.w, right: dom.left + px, top: dom.top + top, bottom: dom.top + top + LABEL_H });
     }
-  }
+  });
   return boxes;
 }
 
@@ -602,6 +630,7 @@ export function renderEmpty(container, gran, message, opts = {}) {
   const span = zoom ? zoom.endMs - zoom.startMs : chartRange.max - chartRange.min;
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - 112);
   tickUnit = unitFor(span);
+  labelSig = ''; // the axes are set anew below
   topShown = topFor(span);
   view.s = zoom ? Math.max(chartRange.min, zoom.startMs) : chartRange.min;
   view.e = zoom ? Math.min(chartRange.max, zoom.endMs) : chartRange.max;
@@ -628,7 +657,7 @@ export function renderEmpty(container, gran, message, opts = {}) {
   chart.setOption(opt);
   chart.on('datazoom', () => {
     const { min, max } = chartRange;
-    const dz = chart.getOption().dataZoom[0];
+    const dz = zoomPct(chart);
     const startMs = min + (dz.start / 100) * (max - min), endMs = min + (dz.end / 100) * (max - min);
     refreshLabels(chart, startMs, endMs, gran, theme);
     opts.onZoom?.({ startMs, endMs });
@@ -666,6 +695,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   const stat = opts.statRange ? { ...opts.statRange, xs: agg.start[opts.statRange.i0], hours } : null;
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - (mode === 'combined' ? 140 : 112)); // first guess
   tickUnit = unitFor(span);
+  labelSig = ''; // the axes are set anew below
   topShown = topFor(span);
   view.s = zoom ? Math.max(range.min, zoom.startMs) : range.min;
   view.e = zoom ? Math.min(range.max, zoom.endMs) : range.max;
@@ -746,6 +776,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
     });
   }
 
+  // These options carry the ticks of the current view: no need to set them again afterwards.
+  if (charts.length) labelSig = axesSig(charts[0].opt.xAxis);
   // Same layout as now: update in place, so the screen does not flash.
   const sig = [mode, gran, keys.join(','), allKeys.join(','), narrow, theme.text].join('|');
   // After drawing: measure the real plot width and re-space the labels if the estimate was off.
@@ -755,6 +787,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   };
   if (current && current.sig === sig && instances.length === charts.length) {
     charts.forEach((c, i) => instances[i].setOption(c.opt));
+    noteLabels(charts);
     fitLabels();
     placeTotalLabels();
     return;
@@ -767,7 +800,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   const listen = (chart) => {
     chart.on('datazoom', () => {
       const { min, max } = chartRange;
-      const dz = chart.getOption().dataZoom[0];
+      const dz = zoomPct(chart);
       const startMs = min + (dz.start / 100) * (max - min);
       const endMs = min + (dz.end / 100) * (max - min);
       refreshLabels(chart, startMs, endMs, gran, theme);
@@ -802,6 +835,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   if (mode !== 'combined') while (next < allKeys.length) addTitle(allKeys[next++]); // hidden ones at the end
   if (mode !== 'combined') echarts.connect(GROUP);
   current = { sig, titleEls, gran, theme };
+  noteLabels(charts);
   fitLabels();
   placeTotalLabels();
 }
