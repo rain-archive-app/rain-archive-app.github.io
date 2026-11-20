@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=119';
+} from './vars.js?v=120';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=119';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=119';
-import { createRangeBar } from './rangebar.js?v=119';
-import { initAccount, pushFavorites } from './account.js?v=119';
+} from './data.js?v=120';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=120';
+import { createRangeBar } from './rangebar.js?v=120';
+import { initAccount, pushFavorites } from './account.js?v=120';
 
 const $ = (id) => document.getElementById(id);
 
@@ -830,6 +830,21 @@ function setAgg(value) {
   renderResults();
   fillAxis(); // complete the bars at both ends (a month or a year needs all of its hours)
 }
+// The step follows the width of the view: hours below a month, days from a month, weeks from a
+// year. It only switches when the view crosses one of these limits, so a step chosen by hand stays
+// as long as the view keeps within the same range.
+const AUTO_STEPS = [[360 * 86400e3, 'week'], [28 * 86400e3, 'day'], [0, 'hour']];
+let autoBand = null;
+function autoStep() {
+  if (!zoomWin) return false;
+  const span = zoomWin.endMs - zoomWin.startMs;
+  const step = AUTO_STEPS.find(([min]) => span >= min)[1];
+  if (step === autoBand) return false;
+  autoBand = step;
+  if (state.agg === step) return false;
+  setAgg(step);
+  return true;
+}
 document.querySelectorAll('input[name="agg"]').forEach((r) => { r.onchange = () => setAgg(r.value); });
 $('btn-finer').onclick = () => { const i = STEPS.indexOf(state.agg); if (i > 0) setAgg(STEPS[i - 1]); };
 $('btn-coarser').onclick = () => { const i = STEPS.indexOf(state.agg); if (i < STEPS.length - 1) setAgg(STEPS[i + 1]); };
@@ -1122,6 +1137,7 @@ function scheduleRelayout(delay = 350) { clearTimeout(relayoutTimer); relayoutTi
 async function relayout() {
   if (!raw || !zoomWin || !axis) return;
   if (rangeBar.isDragging()) { scheduleRelayout(); return; }
+  autoStep(); // a zoom past a month or a year changes the step
   snapView();
   const vS = unwall(zoomWin.startMs), vE = unwall(zoomWin.endMs);
   const span = vE - vS;
@@ -1844,7 +1860,7 @@ async function showWindow(win) {
   trimRaw();
   renderResults(); // the axis first, then the view on it
   zoomWin = win;
-  renderResults();
+  if (!autoStep()) renderResults(); // a new step redraws by itself
   setActiveView(null);
 }
 // The range of the totals (wall ms): the marks on the chart, or else the period.
