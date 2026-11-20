@@ -141,36 +141,69 @@ async function emailAction(kind) {
     } else if (kind === 'reset') {
       await au.sendPasswordResetEmail(auth, email);
       opts.toast('If an account exists for this address, an e-mail to reset the password has been sent');
+    } else if (kind === 'create') {
+      if (pw !== pw2) { opts.toast('The two passwords are different'); throw null; }
+      await au.createUserWithEmailAndPassword(auth, email, pw);
+      emailOpen = false; pw = ''; pw2 = '';
+      opts.toast(`Account created for ${email}. You are signed in: your favorites are now saved online.`);
     } else {
-      await (kind === 'create' ? au.createUserWithEmailAndPassword : au.signInWithEmailAndPassword)(auth, email, pw);
+      await au.signInWithEmailAndPassword(auth, email, pw);
       emailOpen = false; pw = '';
+      opts.toast(`Signed in as ${email}`);
     }
   } catch (e) {
-    opts.toast(AUTH_MSG[e.code] || `Failed (${e.code || e.message})`);
+    if (e) {
+      let msg = AUTH_MSG[e.code] || `Failed (${e.code || e.message})`;
+      if (kind === 'signin' && e.code === 'auth/invalid-credential') msg += '. New here? Choose "Create an account".';
+      opts.toast(msg);
+    }
   }
   busy = false;
   render();
 }
 
+// Two clearly separate modes: signing in to an existing account, or creating a new one.
+let emailMode = 'signin', pw2 = '';
 function emailForm() {
+  const box = document.createElement('div');
+  box.className = 'account-email';
+  const create = emailMode === 'create';
+  const head = document.createElement('div');
+  head.className = 'account-head';
+  const title = document.createElement('strong');
+  title.textContent = create ? 'Create an account' : 'Sign in with e-mail';
+  const close = btn('✕', 'btn mini link', () => { emailOpen = false; render(); }, 'Close');
+  close.setAttribute('aria-label', 'Close');
+  head.append(title, close);
+
   const form = document.createElement('form');
   form.className = 'account-form';
   const field = (type, value, placeholder, auto, set) => {
     const i = document.createElement('input');
-    Object.assign(i, { type, value, placeholder, autocomplete: auto, required: false });
-    i.oninput = () => set(i.value.trim());
+    Object.assign(i, { type, value, placeholder, autocomplete: auto });
+    i.oninput = () => set(type === 'password' ? i.value : i.value.trim());
     return i;
   };
-  const em = field('email', email, 'E-mail', 'username', (v) => { email = v; });
-  const pass = field('password', pw, 'Password', 'current-password', (v) => { pw = v; });
-  const signInBtn = btn(busy ? '…' : 'Sign in', 'btn small primary', null);
-  signInBtn.type = 'submit';
-  form.onsubmit = (e) => { e.preventDefault(); emailAction('signin'); };
-  form.append(em, pass, signInBtn,
-    btn('Create account', 'btn small', () => emailAction('create')),
-    btn('E-mail me a link', 'btn small', () => emailAction('link'), 'No password: get a sign-in link by e-mail'),
-    btn('Forgot password?', 'btn mini link', () => emailAction('reset')));
-  return form;
+  form.append(field('email', email, 'E-mail', 'username', (v) => { email = v; }),
+    field('password', pw, create ? 'Choose a password (6+ characters)' : 'Password',
+      create ? 'new-password' : 'current-password', (v) => { pw = v; }));
+  if (create) form.append(field('password', pw2, 'Repeat the password', 'new-password', (v) => { pw2 = v; }));
+  const go = btn(busy ? '…' : create ? 'Create account' : 'Sign in', 'btn small primary', null);
+  go.type = 'submit';
+  form.append(go);
+  form.onsubmit = (e) => { e.preventDefault(); emailAction(create ? 'create' : 'signin'); };
+
+  const links = document.createElement('div');
+  links.className = 'account-links small';
+  const swap = btn(create ? 'Already have an account? Sign in' : 'No account yet? Create one', 'btn mini link',
+    () => { emailMode = create ? 'signin' : 'create'; render(); });
+  links.append(swap);
+  if (!create) {
+    links.append(btn('Forgot password?', 'btn mini link', () => emailAction('reset')),
+      btn('No password: e-mail me a sign-in link', 'btn mini link', () => emailAction('link')));
+  }
+  box.append(head, form, links);
+  return box;
 }
 
 async function signOut() {
@@ -231,8 +264,8 @@ function render() {
     const txt = document.createElement('span');
     txt.className = 'small muted';
     txt.textContent = 'Keep your favorites on all your devices:';
-    line.append(txt, btn(busy && !emailOpen ? 'Signing in…' : 'Sign in with Google', 'btn small', signIn),
-      btn(emailOpen ? 'Hide e-mail' : 'With e-mail', 'btn small', () => { emailOpen = !emailOpen; render(); }));
+    line.append(txt, btn(busy && !emailOpen ? 'Signing in…' : 'Sign in with Google', 'btn small', signIn));
+    if (!emailOpen) line.append(btn('Sign in with e-mail', 'btn small', () => { emailOpen = true; emailMode = 'signin'; render(); }));
   }
   box.append(line);
   if (!user && emailOpen) box.append(emailForm());

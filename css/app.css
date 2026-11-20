@@ -148,9 +148,13 @@ input:disabled { opacity: .55; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .account { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.account-email { margin-top: 10px; padding: 8px 10px 6px; border: 1px solid var(--line); border-radius: 10px; }
+.account-head { display: flex; align-items: center; justify-content: space-between; }
+.account-links { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-top: 4px; }
+.account-links .btn.mini, .account-head .btn.mini { margin-left: 0; }
 .account-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .account-form input { flex: 1 1 180px; width: auto; min-height: 34px; padding: 5px 9px; }
-.account-form .btn.link { border: 0; background: none; text-decoration: underline; color: var(--muted); }
+.account .btn.link { border: 0; background: none; text-decoration: underline; color: var(--muted); }
 .account-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .account-line .btn.mini { margin-left: 0; }
 .account .btn.danger { color: var(--danger); }
@@ -376,4 +380,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=104"); }
+  background-image: url("../icons/mapbox-logo.svg?v=105"); }
