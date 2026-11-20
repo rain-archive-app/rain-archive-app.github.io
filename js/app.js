@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=149';
+} from './vars.js?v=150';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=149';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=149';
-import { createRangeBar } from './rangebar.js?v=149';
-import { initAccount, pushFavorites } from './account.js?v=149';
+} from './data.js?v=150';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=150';
+import { createRangeBar } from './rangebar.js?v=150';
+import { initAccount, pushFavorites } from './account.js?v=150';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1652,7 +1652,20 @@ function modelUsedText(keys, S, E) {
 }
 
 // The "i" after a variable's name: where its values come from, over the period on screen.
-const SOURCE_NAMES = { era5: 'ERA5 (25 km)', land: 'ERA5-Land (9 km)', mix: 'ERA5 + ERA5-Land' };
+// Each source named with a link to its producer's page.
+const srcLink = (text, url) => `<a href="${url}" target="_blank" rel="noopener">${text}</a>`;
+const SRC = {
+  era5: srcLink('ERA5 (25 km)', 'https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5'),
+  land: srcLink('ERA5-Land (9 km)', 'https://www.ecmwf.int/en/era5-land'),
+  ifs: srcLink('ECMWF IFS (9 km)', 'https://www.ecmwf.int/en/forecasts/documentation-and-support'),
+  ens: srcLink('ECMWF ensemble, 51 runs (25 km)', 'https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts'),
+  forecast: srcLink('Open-Meteo forecast (best model for the place)', 'https://open-meteo.com/en/docs'),
+  cerra: srcLink('CERRA (Europe, 5 km)', 'https://climate.copernicus.eu/copernicus-regional-reanalysis-europe-cerra'),
+};
+const SOURCE_NAMES = { era5: SRC.era5, land: SRC.land, mix: `${SRC.era5} + ${SRC.land}` };
+const MODEL_SRC = {
+  era5_seamless: `${SRC.era5} + ${SRC.land}`, era5: SRC.era5, era5_land: SRC.land, ecmwf_ifs: SRC.ifs, cerra: SRC.cerra,
+};
 function showVarInfo(key) {
   const v = VAR_BY_KEY[key];
   const vS = zoomWin ? unwall(zoomWin.startMs) : rawWindow?.S, vE = zoomWin ? unwall(zoomWin.endMs) : rawWindow?.E;
@@ -1665,17 +1678,17 @@ function showVarInfo(key) {
   let past = null, future = null;
   if (vS == null || vS < now) {
     const model = period?.model || state.model;
-    if (model !== 'best_match') past = MODELS.find((x) => x.id === model).label;
+    if (model !== 'best_match') past = MODEL_SRC[model] || MODELS.find((x) => x.id === model).label;
     else {
       const parts = [];
       if (vS == null || vS < IFS_FROM) parts.push(`${SOURCE_NAMES[pre2017Source(key)]} until 2016`);
-      if (vE == null || vE > IFS_FROM) parts.push('ECMWF IFS (9 km)');
+      if (vE == null || vE > IFS_FROM) parts.push(SRC.ifs);
       past = parts.join(', then ');
     }
   }
   if (vE == null || vE > now) {
-    future = 'Open-Meteo forecast (best model for the place)';
-    if (['sum', 'mean'].includes(v.kind)) future += '; shaded range: ECMWF ensemble, 51 runs (25 km)';
+    future = SRC.forecast;
+    if (['sum', 'mean'].includes(v.kind)) future += `; shaded range: ${SRC.ens}`;
   }
   if (past && future && past !== future) { add('Past', past); add('Forecast', future); }
   else add('Source', past || future);
