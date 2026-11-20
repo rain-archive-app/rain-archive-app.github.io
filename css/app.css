@@ -265,7 +265,8 @@ body.two-fingers .chart > div + div { display: none !important; }
   background: var(--accent); color: var(--accent-text); font-size: 11px;
 }
 .mark-guide.end span { left: auto; right: 4px; }
-.mark-guide.low span { top: -19px; } /* two marks close together: the end's label goes just above the start's */
+.mark-guide.flip span { left: auto; right: 4px; } /* marks close together: the flags turn round, outwards */
+.mark-guide.end.flip span { left: 4px; right: auto; }
 /* Round handles on the waiting marks' lines, to drag them sideways, and on the line joining them. */
 .mark-handle {
   position: absolute; left: -1px; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%);
@@ -307,6 +308,8 @@ body.two-fingers .chart > div + div { display: none !important; }
 .chart-tools .stepper .btn.icon { min-height: 26px; height: 26px; }
 /* The first title (all of them when combined) beside the tools; the charts below them. */
 #charts .chart { clear: both; }
+/* The lane of the marks' dates, between the zone above (titles, tools) and the first chart. */
+#charts .chart.first { margin-top: 22px; }
 #charts > .chart-title:first-child { margin-top: 4px; }
 #charts.combined-mode > .chart-title { margin-top: 4px; }
 #charts.combined-mode > .chart-title:first-child { margin-top: 4px; }
@@ -405,4 +408,4 @@ dialog.var-info .dialog-head { padding: 0 0 8px; }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=142"); }
+  background-image: url("../icons/mapbox-logo.svg?v=148"); }

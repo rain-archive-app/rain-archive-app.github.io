@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=142';
-import { fmtWall, STEP_MS } from './data.js?v=142';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=148';
+import { fmtWall, STEP_MS } from './data.js?v=148';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -37,8 +37,7 @@ export function chartModeIcon(keys, toCombined) {
   if (toCombined) {
     return line('M3 16l5-7 5 5 8-8', 0) + line('M3 10l5 7 5-4 8 5', 1);
   }
-  return '<path d="M3 12h18" stroke-width="1" opacity=".45"/>'
-    + line('M3 9l5-4 5 2.5 8-4', 0) + line('M3 19.5l5-4 5 2.5 8-4', 1);
+  return line('M3 9l5-4 5 2.5 8-4', 0) + line('M3 19.5l5-4 5 2.5 8-4', 1);
 }
 
 // ---------- Axis labels ----------
@@ -195,8 +194,9 @@ function applyLabels(gran, theme) {
   // The units above the y axes follow the top of the plot (separate charts only have them).
   const unitTop = { top: grid.top - UNIT_GAP - 11 };
   for (const c of instances) {
-    const units = c.getModel().getComponent('graphic') ? { graphic: [{ id: 'unit-l', ...unitTop }, { id: 'unit-r', ...unitTop }] } : {};
-    c.setOption({ xAxis, grid, ...units });
+    // The ids of the unit texts of this chart (unit-l / unit-r, or unit-0, unit-1… when combined).
+    const ids = (c.getModel().getComponent('graphic')?.option?.elements || []).map((e) => e.id).filter((id) => /^unit-/.test(id));
+    c.setOption({ xAxis, grid, ...(ids.length ? { graphic: ids.map((id) => ({ id, ...unitTop })) } : {}) });
   }
 }
 
@@ -852,7 +852,7 @@ export function renderEmpty(container, gran, message, opts = {}) {
   container.innerHTML = '';
   container.style.setProperty('--n', 1);
   const el = document.createElement('div');
-  el.className = 'chart last';
+  el.className = 'chart first last';
   container.append(el);
   const chart = echarts.init(el, null, { renderer: 'canvas' });
   chart.setOption(opt);
@@ -915,20 +915,20 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   if (mode === 'combined') {
     // One y axis per unit (+ one per unit for running totals), alternating left/right, all labelled
     // and coloured like their variable.
-    const AX_W = narrow ? 44 : 52;
+    const fs = narrow ? 10 : 11;
     const axes = [];
-    const axisIdx = (id, name, kind, col) => {
+    const axisIdx = (id, name, kind, col, arrs) => {
       let i = axes.findIndex((a) => a.id === id);
       if (i < 0) {
         const side = axes.length % 2 === 0 ? 'left' : 'right';
-        const offset = Math.floor(axes.length / 2) * AX_W;
-        const ax = yAxis(name, kind, theme, side, offset, axes.length === 0, narrow ? 28 : 34);
+        const ax = yAxis(name, kind, theme, side, 0, axes.length === 0, 0);
         ax.axisLine = { show: true, lineStyle: { color: col } };
-        ax.axisLabel = { ...ax.axisLabel, color: col, fontSize: narrow ? 10 : 11, margin: 4 };
-        ax.nameTextStyle = { ...ax.nameTextStyle, color: col, fontSize: narrow ? 10 : 11 };
-        axes.push({ id, ...ax });
+        ax.axisLabel = { ...ax.axisLabel, color: col, fontSize: fs, fontFamily: bodyFont(), margin: 4 };
+        ax.nameTextStyle = { ...ax.nameTextStyle, color: col, fontSize: fs, padding: side === 'left' ? [0, 4, 0, 0] : [0, 0, 0, 4] };
+        axes.push({ id, ...ax, arrs: [], axKind: kind });
         i = axes.length - 1;
       }
+      axes[i].arrs.push(...arrs); // every variable on this axis counts for its width
       return i;
     };
     const all = [];
@@ -936,8 +936,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const v = VAR_BY_KEY[k];
       const s = series[k];
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
-      const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
-      const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
+      const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k), [s.val, s.lo, s.hi, s.min, s.max]);
+      const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted, [s.cum, s.cumLo, s.cumHi]) : 0;
       all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc, totalIdx, stat));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
@@ -947,11 +947,28 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
         ax.kind = v.kind;
       }
     }
-    const lefts = Math.ceil(axes.length / 2), rights = Math.floor(axes.length / 2);
-    const opt = baseOption(gran, theme, makeTooltip(keys), 8 + Math.max(rights, 1) * AX_W, 8 + lefts * AX_W, zoom);
-    opt.yAxis = axes.map(({ id, fixed, kind, ...a }) => (kind ? applyScale(a, kind, fixed) : a));
+    // Each axis only as wide as its own numbers (or its unit, written above them, if wider), the
+    // axes of a side set one after the other from the plot outwards, 2 px from the edge.
+    measureCtx ??= document.createElement('canvas').getContext('2d');
+    measureCtx.font = `${fs}px ${bodyFont()}`;
+    const used = { left: 0, right: 0 };
+    for (const a of axes) {
+      const nums = axisRoom(a.arrs, a.fixed, a.axKind, fs).gap;
+      a.w = Math.max(nums, Math.ceil(measureCtx.measureText(a.name).width) + 4) + 4;
+      a.offset = used[a.position];
+      used[a.position] += a.w;
+    }
+    const gridLeft = used.left + 2, gridRight = Math.max(used.right, 8) + 2;
+    const opt = baseOption(gran, theme, makeTooltip(keys), gridRight, gridLeft, zoom);
+    // Units above the axes, each against the outer edge of its own column (left edge on the left,
+    // right edge on the right), 9 px above the top of the plot.
+    const unitTop = opt.grid.top - UNIT_GAP - 11;
+    opt.graphic = axes.map((a, i) => ({ type: 'text', id: `unit-${i}`, silent: true, top: unitTop,
+      [a.position]: (a.position === 'left' ? gridLeft : gridRight) - a.offset - a.w + 2,
+      style: { text: a.name, fill: a.nameTextStyle.color, font: `${fs}px ${bodyFont()}` } }));
+    opt.yAxis = axes.map(({ id, fixed, kind, arrs, axKind, w, ...a }) => ({ ...(kind ? applyScale(a, kind, fixed) : a), name: '' }));
     opt.series = [...all, nowSeries(opts.nowMs, theme)]; // no legend: the coloured titles above the chart play that role
-    charts.push({ opt, cls: 'chart combined' });
+    charts.push({ opt, cls: 'chart combined first' });
   } else {
     keys.forEach((k, n) => {
       const v = VAR_BY_KEY[k];
@@ -974,7 +991,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       opt.yAxis = yAxes;
       opt.graphic = unitTexts(unitName, hasCum ? `Σ ${s.unit}` : '', theme, opt.grid.top);
       opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx, stat), nowSeries(opts.nowMs, theme)];
-      charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
+      charts.push({ opt, cls: 'chart' + (n === 0 ? ' first' : '') + (n === keys.length - 1 ? ' last' : '') });
     });
   }
 

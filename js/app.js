@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=142';
+} from './vars.js?v=148';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=142';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=142';
-import { createRangeBar } from './rangebar.js?v=142';
-import { initAccount, pushFavorites } from './account.js?v=142';
+} from './data.js?v=148';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=148';
+import { createRangeBar } from './rangebar.js?v=148';
+import { initAccount, pushFavorites } from './account.js?v=148';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1376,21 +1376,19 @@ function showPendingMark() {
   }
 }
 
+const MARK_LANE = 22; // px, the lane of the marks' dates (the first chart's top margin in the CSS)
 // Where the chart's time axis lies in the marks' container (the charts-wrap element).
 function markView() {
   const chartEl = $('charts').querySelector('.chart');
   const grid = chartEl && echarts.getInstanceByDom(chartEl)?.getModel()?.getComponent('grid')?.coordinateSystem?.getRect();
   if (!grid) return null;
   const wrap = $('mark-link').parentElement.getBoundingClientRect();
-  // The marks stay in the chart zone: their date boxes end just over the top of the first chart's own
-  // date labels (the slanted weekdays, about 29 px above the plot, or else the units, 20 px above).
-  const weekdays = echarts.getInstanceByDom(chartEl).getModel().getComponent('xAxis', 1)?.get('show');
-  const labelsTop = grid.y - (weekdays ? 29 : 20);
-  const MARK_BOX_H = 18;
+  // The marks' date boxes have a lane of their own, between the titles and tools above and the first
+  // chart (its top margin, see "#charts .chart" in the CSS): nothing else is ever written there.
   return {
     s: zoomWin ? zoomWin.startMs : chartRange.min, e: zoomWin ? zoomWin.endMs : chartRange.max,
     left: chartEl.getBoundingClientRect().left - wrap.left + grid.x, width: grid.width, wrap,
-    top: Math.round(chartEl.getBoundingClientRect().top - wrap.top + labelsTop - MARK_BOX_H + 2),
+    top: Math.round(chartEl.getBoundingClientRect().top - wrap.top - MARK_LANE + 2),
   };
 }
 
@@ -1419,26 +1417,35 @@ function placePendingLine() {
   const link = $('mark-link');
   const xOf = (t) => v.left + ((t - v.s) / (v.e - v.s)) * v.width;
   const y = v ? handlesY(v, xOf) : 0;
+  // Both date boxes in their own lane, at the same height. Each is a flag on its line: the start's
+  // flies to the right, the end's to the left; when the two would overlap, both turn round and fly
+  // outwards instead.
+  const top = v?.top ?? 0;
+  const flags = {};
   for (const which of ['start', 'end']) {
     const line = $(`mark-line-${which}`), t = pendingMarks[which];
     line.hidden = !v || t == null || t < v.s || t > v.e;
     if (line.hidden) continue;
-    line.style.left = `${xOf(t)}px`;
-    line.style.top = `${v.top}px`;
+    const x = xOf(t);
+    line.style.left = `${x}px`;
+    line.style.top = `${top}px`;
     line.firstChild.textContent = markLabel(t);
-    line.querySelector('.mark-handle').style.top = `${y - v.top}px`; // inside the line, which starts at v.top
+    line.querySelector('.mark-handle').style.top = `${y - top}px`; // inside the line, which starts at top
+    flags[which] = { line, x, w: line.firstChild.offsetWidth };
   }
+  const { start: fs, end: fe } = flags;
+  const crowded = fs && fe && fs.x + 4 + fs.w + 4 > fe.x - 4 - fe.w;
+  for (const f of [fs, fe]) f?.line.classList.toggle('flip', !!crowded);
   const { start, end } = pendingMarks;
   const both = v && start != null && end != null;
   const x1 = both ? Math.max(v.left, xOf(start)) : 0, x2 = both ? Math.min(v.left + v.width, xOf(end)) : 0;
   link.hidden = x2 <= x1;
-  if (link.hidden) { $('mark-line-end').classList.remove('low'); return; }
+  if (link.hidden) return;
   link.style.left = `${x1}px`;
   link.style.width = `${x2 - x1}px`;
   link.style.top = `${y}px`;
   link.firstElementChild.textContent = markDuration(end - start);
   link.classList.toggle('narrow', x2 - x1 < 64);
-  $('mark-line-end').classList.toggle('low', x2 - x1 < 220);
 }
 addEventListener('scroll', () => { if (pendingMarks.start != null || pendingMarks.end != null) placePendingLine(); }, true);
 
@@ -1753,6 +1760,22 @@ function restartRunningTotals(agg, vis, last = Infinity) {
   }
 }
 
+// The tools at the top right sit on the same bottom line as the last title written beside them
+// (the first one, or the last of all when the charts are combined): whichever is higher goes down.
+function alignTools() {
+  const tools = document.querySelector('.chart-tools');
+  const header = [];
+  for (const el of $('charts').children) { if (el.classList.contains('chart')) break; header.push(el); }
+  tools.style.marginTop = '0px';
+  header.forEach((el) => { el.style.paddingTop = ''; });
+  if (!header.length || tools.offsetParent === null) return;
+  const last = header[header.length - 1];
+  const name = last.querySelector('.name') || last;
+  const d = tools.getBoundingClientRect().bottom - name.getBoundingClientRect().bottom;
+  if (d > 0.5) header[0].style.paddingTop = `${d}px`; // the title block is lower than the tools: it goes down
+  else if (d < -0.5) tools.style.marginTop = `${-d}px`; // the titles go further down: so do the tools
+}
+
 // Variables whose chart is hidden with the eye of their title (they stay selected).
 const hiddenVars = new Set();
 
@@ -1824,6 +1847,15 @@ function renderResults() {
     { allKeys, statRange: dates && endIdx >= 0 ? { i0: dates.i0, i1: dates.i1 } : null, range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the end of the last bar (where the end mark sits), kept on screen.
       endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.end[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
+  alignTools();
+  // A chart drawn before the page grew a scroll bar keeps the old, wider size: resize it then.
+  setTimeout(() => {
+    const off = [...$('charts').querySelectorAll('.chart')].some((el) => {
+      const c = echarts.getInstanceByDom(el);
+      return c && Math.abs(c.getWidth() - el.clientWidth) > 1;
+    });
+    if (off) onResize();
+  }, 60);
   // Time bar: the axis range, the visible window, and the first variable's profile.
   $('rangebar').hidden = false;
   lastShadow = agg.x.map((x, i) => [x, agg.series[keys[0]].val[i]]);
@@ -2085,7 +2117,7 @@ let lastShadow = null;
 let resizeTimer;
 const onResize = () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); placePendingLine(); }, 150);
+  resizeTimer = setTimeout(() => { alignTools(); resizeCharts(); rangeBar.update({ redraw: true }); placePendingLine(); }, 150);
 };
 window.addEventListener('resize', onResize);
 // The charts' width also changes without the window's: a scroll bar appearing when a chart is added,
