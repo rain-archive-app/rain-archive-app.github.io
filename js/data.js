@@ -1,5 +1,5 @@
 ﻿// Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=150';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=153';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -320,7 +320,12 @@ function buildUrl(base, loc, keys, startDate, endDate, model) {
 export async function fetchHourly({ loc, keys, startSec, endSec, model, signal }) {
   const tz = loc.tz;
   const nowSec = Date.now() / 1000;
-  const pastEnd = Math.min(endSec, floorLocalHour(nowSec, tz));
+  // The archive takes dates up to today's date in UTC only: east of Greenwich the local day may
+  // already be tomorrow, which it refuses. Its part then stops at the end of that UTC date (local
+  // midnight), and the forecast API, which also keeps the recent past, gives the hours after it.
+  // (23:00 is that day's last stamp: the next one, 00:00, is already dated the day after.)
+  const archLimit = zonedToUnix(`${new Date(nowSec * 1000).toISOString().slice(0, 10)}T23:00`, tz);
+  const pastEnd = Math.min(endSec, floorLocalHour(nowSec, tz), archLimit);
   const times = [];
   const values = Object.fromEntries(keys.map((k) => [k, []]));
 

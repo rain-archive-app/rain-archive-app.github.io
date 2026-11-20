@@ -82,6 +82,8 @@ async function startSync() {
 function stopSync() { unsub?.(); unsub = null; }
 
 // Called by the app after every change of the favorites.
+export const isSignedIn = () => !!user;
+
 export async function pushFavorites(list) {
   if (!user) return;
   try {

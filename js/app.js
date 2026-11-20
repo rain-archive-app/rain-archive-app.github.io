@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=150';
+} from './vars.js?v=153';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=150';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=150';
-import { createRangeBar } from './rangebar.js?v=150';
-import { initAccount, pushFavorites } from './account.js?v=150';
+} from './data.js?v=153';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=153';
+import { createRangeBar } from './rangebar.js?v=153';
+import { initAccount, pushFavorites, isSignedIn } from './account.js?v=153';
 
 const $ = (id) => document.getElementById(id);
 
@@ -2165,6 +2165,41 @@ initAccount({
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
 }
+
+// ---------- New version ----------
+// The version running is the ?v= of this script; the one online is in sw.js on the server. When the
+// server has a newer one, a warning button appears at the top right: it clears the app's cache and
+// reloads. Checked at the opening, when the app comes back to the screen, and every 30 minutes.
+const APP_VERSION = Number(new URL(import.meta.url).searchParams.get('v')) || 0;
+async function checkVersion() {
+  try {
+    const txt = await (await fetch(`sw.js?check=${Date.now()}`, { cache: 'no-store' })).text();
+    const online = Number(/rain-archive-v(\d+)/.exec(txt)?.[1]) || 0;
+    $('btn-update').hidden = !(online > APP_VERSION);
+  } catch { /* offline: nothing to say */ }
+}
+async function updateApp() {
+  for (const r of (await navigator.serviceWorker?.getRegistrations?.()) || []) await r.unregister();
+  for (const k of (await caches?.keys?.()) || []) await caches.delete(k);
+  location.reload();
+}
+$('btn-update').onclick = () => {
+  if (isSignedIn()) { updateApp(); return; }
+  // Not signed in: the favorites only live in this browser. Suggest an account first.
+  showChoice({
+    title: 'New version available',
+    text: 'Updating clears the app\'s cache and reloads it; your favorites on this device are kept. '
+      + 'Tip: sign in (Location tab) to keep your favorites online, on all your devices, whatever happens to this browser.',
+    buttons: [
+      { label: 'Update now', primary: true, run: updateApp },
+      { label: 'Sign in first', run: () => openPanel('card-location') },
+      { label: 'Later' },
+    ],
+  });
+};
+checkVersion();
+setInterval(checkVersion, 30 * 60e3);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
 
 // Show unexpected errors in the status line so they can be reported.
 window.addEventListener('error', (e) => setStatus(`Error: ${e.message}`, 'error'));
