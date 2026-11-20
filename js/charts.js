@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=122';
-import { fmtWall, STEP_MS } from './data.js?v=122';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=123';
+import { fmtWall, STEP_MS } from './data.js?v=123';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -255,11 +255,18 @@ let tapCloseOn = false;
 function closeTipOnTap(container) {
   if (tapCloseOn || !IS_TOUCH) return;
   tapCloseOn = true;
-  container.addEventListener('click', (e) => {
-    if (!e.target.closest('.chart > div + div')) return;
+  // On the touch end itself: phones send the click (if at all: iOS skips it on plain boxes) only
+  // afterwards, with mouse events that could open the box again where the finger was.
+  const close = (e) => {
+    if (!e.target.closest?.('.chart > div + div')) return;
+    if (e.cancelable) e.preventDefault(); // no click or mouse events after this tap
     e.stopPropagation();
-    for (const c of instances) c.dispatchAction({ type: 'hideTip' });
-  });
+    const hide = () => { for (const c of instances) c.dispatchAction({ type: 'hideTip' }); };
+    hide();
+    setTimeout(hide, 80); // and again, in case something reopened it meanwhile
+  };
+  container.addEventListener('touchend', close, { passive: false });
+  container.addEventListener('click', close);
 }
 
 // No tooltip (the box with the values) during a two-finger zoom or pan, on any of the charts.
