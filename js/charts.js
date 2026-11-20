@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=120';
-import { fmtWall, STEP_MS } from './data.js?v=120';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=122';
+import { fmtWall, STEP_MS } from './data.js?v=122';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -209,11 +209,12 @@ function attachTouch(chart, el) {
       s: min + (dz.start / 100) * (max - min), e: min + (dz.end / 100) * (max - min),
       m0: mid(e.touches), d0: dist(e.touches), left: box.left + rect.x, width: rect.width, mode: null,
     };
-    chart.dispatchAction({ type: 'hideTip' });
+    hideTips(true);
   }, { passive: true });
   el.addEventListener('touchmove', (e) => {
     if (!g || e.touches.length !== 2) return;
     e.preventDefault();
+    hideTips(true);
     const { min, max, minSpan } = chartRange;
     const ratio = dist(e.touches) / g.d0;
     const dx = mid(e.touches) - g.m0;
@@ -239,7 +240,35 @@ function attachTouch(chart, el) {
     if (en > max) { s -= en - max; en = max; }
     chart.dispatchAction({ type: 'dataZoom', startValue: Math.max(min, s), endValue: en });
   }, { passive: false });
-  el.addEventListener('touchend', (e) => { if (e.touches.length < 2) g = null; }, { passive: true });
+  const end = (e) => {
+    if (e.touches.length < 2) g = null;
+    // The tooltip stays off until every finger is up: the finger left last would bring it back.
+    if (!e.touches.length) hideTips(false);
+    else hideTips(true);
+  };
+  el.addEventListener('touchend', end, { passive: true });
+  el.addEventListener('touchcancel', end, { passive: true });
+}
+
+// A tap on the box with the values closes it (it is the chart's second child, after the canvas).
+let tapCloseOn = false;
+function closeTipOnTap(container) {
+  if (tapCloseOn || !IS_TOUCH) return;
+  tapCloseOn = true;
+  container.addEventListener('click', (e) => {
+    if (!e.target.closest('.chart > div + div')) return;
+    e.stopPropagation();
+    for (const c of instances) c.dispatchAction({ type: 'hideTip' });
+  });
+}
+
+// No tooltip (the box with the values) during a two-finger zoom or pan, on any of the charts.
+let tipsOff = false;
+function hideTips(off) {
+  if (off) for (const c of instances) c.dispatchAction({ type: 'hideTip' });
+  if (off === tipsOff) return;
+  tipsOff = off;
+  document.body.classList.toggle('two-fingers', off);
 }
 
 // ---------- Titles, tooltip ----------
@@ -602,7 +631,8 @@ function baseOption(gran, theme, tooltipFmt, gridRight, gridLeft, zoom) {
     textStyle: { color: theme.text },
     grid: { left: gridLeft, right: gridRight, top: topShown ? GRID_TOP.on : GRID_TOP.off, bottom: 28 },
     tooltip: {
-      trigger: 'axis', confine: true, triggerOn: 'mousemove|click',
+      // On touch screens the box takes taps, so that tapping it closes it (see closeTipOnTap).
+      trigger: 'axis', confine: true, triggerOn: 'mousemove|click', enterable: IS_TOUCH,
       backgroundColor: theme.card, borderColor: theme.line, textStyle: { color: theme.text, fontSize: 12 },
       axisPointer: { type: 'line', lineStyle: { color: theme.muted }, label: { show: false } },
       formatter: tooltipFmt,
@@ -799,6 +829,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   container.innerHTML = '';
   container.style.setProperty('--n', keys.length); // used by full-screen sizing
   const titleEls = {};
+  closeTipOnTap(container);
   const listen = (chart) => {
     chart.on('datazoom', () => {
       const { min, max } = chartRange;

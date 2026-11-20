@@ -240,6 +240,8 @@ details.sub > summary { font-weight: 400; }
 
 /* Vertical one-finger swipes still scroll the page; two-finger gestures are handled by the app. */
 .chart { width: 100%; height: 230px; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* Two-finger zoom or pan: no box with the values (ECharts' tooltip is the chart's second child). */
+body.two-fingers .chart > div + div { display: none !important; }
 .chart.last { height: 230px; }
 
 /* Time-step stepper in the toolbar: ‹ /h › */
@@ -389,4 +391,4 @@ dialog.var-info .dialog-head { padding: 0 0 8px; }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=120"); }
+  background-image: url("../icons/mapbox-logo.svg?v=122"); }
