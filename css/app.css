@@ -296,7 +296,7 @@ body.two-fingers .chart > div + div { display: none !important; }
 /* Combine / full-screen / refresh icons sit at the top right of the charts. */
 .charts-wrap { position: relative; }
 .chart-tools { position: absolute; top: 8px; right: 0; display: flex; gap: 3px; z-index: 2; }
-#charts > .chart-title:first-child { padding-right: 98px; }
+#charts > .chart-title:first-child { padding-right: 130px; }
 
 /* Long-press menu of a favorite */
 .menu {
@@ -392,4 +392,4 @@ dialog.var-info .dialog-head { padding: 0 0 8px; }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=123"); }
+  background-image: url("../icons/mapbox-logo.svg?v=126"); }

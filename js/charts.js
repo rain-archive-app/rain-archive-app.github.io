@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=123';
-import { fmtWall, STEP_MS } from './data.js?v=123';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=126';
+import { fmtWall, STEP_MS } from './data.js?v=126';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -651,6 +651,103 @@ function baseOption(gran, theme, tooltipFmt, gridRight, gridLeft, zoom) {
         minValueSpan: 3 * 3600e3, ...win }, // the same for every aggregation level, so changing it never moves the view
     ],
   };
+}
+
+// ---------- Image export ----------
+
+/**
+ * The charts on screen as one image: a heading, then each chart under its coloured titles (hidden
+ * variables left out), the marks of the totals, and the data credit at the bottom.
+ * format: 'png' | 'jpg' | 'svg'. o: { heading, credit, marks: [startMs, endMs] | null, filename }.
+ */
+export async function exportCharts(container, format, o) {
+  const theme = themeColors(), bg = theme.card, accent = css('--accent');
+  const font = getComputedStyle(document.body).fontFamily;
+  const blocks = [];
+  let titles = [];
+  for (const el of container.children) {
+    if (el.classList.contains('chart-title')) {
+      if (!el.classList.contains('is-hidden')) titles.push({ name: el.querySelector('.name').textContent, color: el.querySelector('.dot').style.background });
+    } else if (el.classList.contains('chart')) {
+      const chart = echarts.getInstanceByDom(el);
+      // The chart's own size (its pixels), which may lag behind the page's after a layout change.
+      if (chart) blocks.push({ titles, chart, w: chart.getWidth(), h: chart.getHeight() });
+      titles = [];
+    }
+  }
+  if (!blocks.length) return;
+  const W = Math.max(...blocks.map((b) => b.w));
+  const HEAD = 30, TITLE = 22, FOOT = 22, PAD = 10;
+  let y = HEAD;
+  for (const b of blocks) { b.ty = y; b.y = y + (b.titles.length ? TITLE : 4); y = b.y + b.h; }
+  const H = y + FOOT;
+  // Marks: x on each chart, and the top and bottom of its plot.
+  for (const b of blocks) {
+    const rect = b.chart.getModel().getComponent('grid')?.coordinateSystem?.getRect();
+    b.marks = !o.marks || !rect ? [] : o.marks.map((t) => b.chart.convertToPixel({ xAxisIndex: 0 }, t))
+      .filter((x) => x >= rect.x - 1 && x <= rect.x + rect.width + 1).map((x) => ({ x, y0: rect.y, y1: rect.y + rect.height }));
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  let blob;
+  if (format === 'svg') {
+    const parts = [`<rect width="${W}" height="${H}" fill="${bg}"/>`,
+      `<text x="${PAD}" y="20" font-family="${esc(font)}" font-size="14" font-weight="700" fill="${theme.text}">${esc(o.heading)}</text>`];
+    for (const b of blocks) {
+      let x = PAD;
+      for (const t of b.titles) {
+        parts.push(`<circle cx="${x + 4.5}" cy="${b.ty + 11}" r="4.5" fill="${t.color}"/>`,
+          `<text x="${x + 14}" y="${b.ty + 15}" font-family="${esc(font)}" font-size="13" font-weight="600" fill="${theme.text}">${esc(t.name)}</text>`);
+        x += 14 + t.name.length * 7.2 + 16;
+      }
+      // The same chart drawn again by ECharts as SVG, off screen, at the same size.
+      const div = document.createElement('div');
+      div.style.cssText = `position:fixed;left:-10000px;top:0;width:${b.w}px;height:${b.h}px`;
+      document.body.append(div);
+      const inst = echarts.init(div, null, { renderer: 'svg', width: b.w, height: b.h });
+      inst.setOption({ ...b.chart.getOption(), animation: false });
+      const svg = inst.renderToSVGString().replace(/^<\?xml[^>]*>/, '');
+      inst.dispose(); div.remove();
+      parts.push(`<g transform="translate(0,${b.y})">${svg}</g>`);
+      for (const m of b.marks) parts.push(`<line x1="${m.x}" x2="${m.x}" y1="${b.y + m.y0}" y2="${b.y + m.y1}" stroke="${accent}" stroke-width="2"/>`);
+    }
+    parts.push(`<text x="${W - PAD}" y="${H - 7}" text-anchor="end" font-family="${esc(font)}" font-size="11" fill="${theme.muted}">${esc(o.credit)}</text>`);
+    blob = new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join('')}</svg>`], { type: 'image/svg+xml' });
+  } else {
+    const R = 2; // twice the screen resolution
+    const cv = document.createElement('canvas');
+    cv.width = W * R; cv.height = H * R;
+    const ctx = cv.getContext('2d');
+    ctx.scale(R, R);
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = theme.text; ctx.font = `700 14px ${font}`; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(o.heading, PAD, 20);
+    for (const b of blocks) {
+      let x = PAD;
+      ctx.font = `600 13px ${font}`;
+      for (const t of b.titles) {
+        ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(x + 4.5, b.ty + 11, 4.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = theme.text; ctx.fillText(t.name, x + 14, b.ty + 15);
+        x += 14 + ctx.measureText(t.name).width + 16;
+      }
+      const img = new Image();
+      img.src = b.chart.getDataURL({ type: 'png', pixelRatio: R, backgroundColor: bg });
+      await img.decode();
+      ctx.drawImage(img, 0, b.y, b.w, b.h);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2;
+      for (const m of b.marks) { ctx.beginPath(); ctx.moveTo(m.x, b.y + m.y0); ctx.lineTo(m.x, b.y + m.y1); ctx.stroke(); }
+    }
+    ctx.fillStyle = theme.muted; ctx.font = `11px ${font}`; ctx.textAlign = 'right';
+    ctx.fillText(o.credit, W - PAD, H - 7);
+    blob = await new Promise((res) => cv.toBlob(res, format === 'jpg' ? 'image/jpeg' : 'image/png', 0.92));
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${o.filename}.${format}`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
 function themeColors() {

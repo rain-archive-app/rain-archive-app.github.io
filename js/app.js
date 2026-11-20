@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=123';
+} from './vars.js?v=126';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=123';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=123';
-import { createRangeBar } from './rangebar.js?v=123';
-import { initAccount, pushFavorites } from './account.js?v=123';
+} from './data.js?v=126';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts } from './charts.js?v=126';
+import { createRangeBar } from './rangebar.js?v=126';
+import { initAccount, pushFavorites } from './account.js?v=126';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1637,52 +1637,34 @@ function modelUsedText(keys, S, E) {
 }
 
 // The "i" after a variable's name: where its values come from, over the period on screen.
-const SOURCE_NAMES = {
-  era5: 'ERA5 (ECMWF reanalysis, ~25 km)',
-  land: 'ERA5-Land (ECMWF land reanalysis, ~9 km)',
-  mix: 'ERA5 and ERA5-Land (derived from both)',
-};
-const KIND_TEXT = {
-  sum: 'Amount over each hour: the bars add the hours up, and the totals add the bars up.',
-  mean: 'Value at each hour: a bar shows the mean of its hours.',
-  dir: 'Direction at each hour: a bar shows the average direction of its hours.',
-  code: 'WMO weather code at each hour: a bar shows the most severe one.',
-};
+const SOURCE_NAMES = { era5: 'ERA5 (25 km)', land: 'ERA5-Land (9 km)', mix: 'ERA5 + ERA5-Land' };
 function showVarInfo(key) {
   const v = VAR_BY_KEY[key];
-  const unit = displayUnit(v, state.units);
-  const z = raw?.tz || tz();
   const vS = zoomWin ? unwall(zoomWin.startMs) : rawWindow?.S, vE = zoomWin ? unwall(zoomWin.endMs) : rawWindow?.E;
   const now = nowHour();
   const rows = [];
   const add = (head, text) => rows.push(`<dt>${head}</dt><dd>${text}</dd>`);
-  add('Variable', `${v.label} · <code>${v.key}</code> · ${unit}`);
-  add('Values', KIND_TEXT[v.kind]);
-  // Past: the archive, by date when "Auto" switches models in 2017.
-  const model = period?.model || state.model;
-  if (model !== 'best_match') {
-    const m = MODELS.find((x) => x.id === model);
-    add('Past', `${m.label}. ${m.note}`);
-  } else {
-    const before = SOURCE_NAMES[pre2017Source(key)];
-    const parts = [];
-    if (vS == null || vS < IFS_FROM) parts.push(`until 31 Dec 2016: ${before}`);
-    if (vE == null || vE > IFS_FROM) parts.push(`from 2017: ECMWF IFS analysis (~9 km)`);
-    add('Past', `Open-Meteo historical weather, “Auto”: ${parts.join('; ')}.`
-      + (period?.filledHours ? ` The last ${period.filledHours} h, not yet in the archive, come from the forecast.` : ''));
-  }
-  // Future: the forecast and its likely range.
-  if (vE == null || vE > now) {
-    let f = 'Open-Meteo forecast, its best model for this place (up to 15 days ahead).';
-    if (['sum', 'mean'].includes(v.kind)) {
-      f += ' Shaded range: between the 10th and 90th percentiles of the 51 runs of the ECMWF ensemble (~25 km).';
-      if (v.kind === 'mean') f += ' For values that are not added up, only the spread of the runs is used, centred on the forecast.';
-      if (key === 'snowfall' || key === 'snow_depth') f += ' In the mountains its cells lie higher (colder) than the place: it can give snow where the forecast gives rain.';
+  add('Variable', `${v.label} · <code>${v.key}</code> · ${displayUnit(v, state.units)}`);
+  // Past (archive) and future (forecast) on screen: one "Source" line when only one of them is there,
+  // or when both say the same.
+  let past = null, future = null;
+  if (vS == null || vS < now) {
+    const model = period?.model || state.model;
+    if (model !== 'best_match') past = MODELS.find((x) => x.id === model).label;
+    else {
+      const parts = [];
+      if (vS == null || vS < IFS_FROM) parts.push(`${SOURCE_NAMES[pre2017Source(key)]} until 2016`);
+      if (vE == null || vE > IFS_FROM) parts.push('ECMWF IFS (9 km)');
+      past = parts.join(', then ');
     }
-    add('Forecast', f);
   }
-  add('Place', `${state.loc?.name || '–'} · ${state.loc ? `${state.loc.lat.toFixed(3)}°, ${state.loc.lon.toFixed(3)}°` : ''} · times in ${z}`);
-  add('More', '<a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo documentation</a> (CC BY 4.0)');
+  if (vE == null || vE > now) {
+    future = 'Open-Meteo forecast (best model for the place)';
+    if (['sum', 'mean'].includes(v.kind)) future += '; shaded range: ECMWF ensemble, 51 runs (25 km)';
+  }
+  if (past && future && past !== future) { add('Past', past); add('Forecast', future); }
+  else add('Source', past || future);
+  add('Data', '<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0)');
   $('var-info-title').textContent = v.label;
   $('var-info-body').innerHTML = `<dl>${rows.join('')}</dl>`;
   $('var-info').showModal();
@@ -1778,8 +1760,9 @@ function renderResults() {
     // No variable selected: the time axes and the time bar stay, the chart is empty with a message.
     lastX = []; lastStart = []; lastEnd = []; lastShadow = [];
     $('btn-chart-mode').hidden = true;
+    $('btn-export').hidden = true;
     $('btn-fullscreen').hidden = false;
-    const range = { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) };
+    const range ={ min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) };
     renderEmpty($('charts'), state.agg, 'No data selected\nChoose a variable in the Data tab', { range, zoom: zoomWin, onZoom: onChartZoom });
     $('rangebar').hidden = false;
     rangeBar.update({ ...chartRange, start: zoomWin ? zoomWin.startMs : chartRange.min, end: zoomWin ? zoomWin.endMs : chartRange.max,
@@ -1791,6 +1774,7 @@ function renderResults() {
   if (!raw.times.length) { setStatus('No data returned for this period.', 'error'); return false; }
 
   $('btn-fullscreen').hidden = false;
+  $('btn-export').hidden = false;
   const modeBtn = $('btn-chart-mode');
   const combined = state.chartMode === 'combined';
   modeBtn.hidden = allKeys.length < 2;
@@ -2009,6 +1993,48 @@ $('charts').addEventListener('click', (e) => {
   }
   renderResults();
 });
+// Download the charts as an image: a small menu of formats under the button.
+function closeExportMenu() { $('export-menu')?.remove(); }
+$('btn-export').onclick = () => {
+  if ($('export-menu')) { closeExportMenu(); return; }
+  const m = document.createElement('div');
+  m.id = 'export-menu';
+  m.className = 'menu';
+  m.setAttribute('role', 'menu');
+  for (const [fmt, label] of [['png', 'PNG image'], ['jpg', 'JPG image'], ['svg', 'SVG (vector)']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = label;
+    b.onclick = () => { closeExportMenu(); downloadCharts(fmt); };
+    m.append(b);
+  }
+  document.body.append(m);
+  const r = $('btn-export').getBoundingClientRect();
+  m.style.left = `${Math.min(Math.max(8, r.right - m.offsetWidth), innerWidth - m.offsetWidth - 8)}px`;
+  m.style.top = `${Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8)}px`;
+  setTimeout(() => document.addEventListener('pointerdown', function away(e) {
+    if (!e.target.closest('#export-menu, #btn-export')) { closeExportMenu(); document.removeEventListener('pointerdown', away); }
+  }), 0);
+};
+async function downloadCharts(format) {
+  if (!raw || !zoomWin) return;
+  const lab = (ms) => fmtWall(ms, true);
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const place = state.loc?.name || 'place';
+  const marks = pendingMarks.start != null && pendingMarks.end != null ? [pendingMarks.start, pendingMarks.end] : null;
+  try {
+    await exportCharts($('charts'), format, {
+      heading: `${place} · ${lab(zoomWin.startMs)} → ${lab(zoomWin.endMs)}`,
+      credit: 'Rain Archive · Weather data by Open-Meteo.com (CC BY 4.0)',
+      marks,
+      filename: `rain-archive_${place.replace(/[^\p{L}\p{N}]+/gu, '-')}_${day(zoomWin.startMs)}_${day(zoomWin.endMs)}`,
+    });
+  } catch (e) {
+    toast(`The image could not be made (${e.message})`);
+  }
+}
+
 $('btn-chart-mode').onclick = () => {
   state.chartMode = state.chartMode === 'stacked' ? 'combined' : 'stacked';
   save();
@@ -2041,10 +2067,18 @@ const rangeBar = createRangeBar($('rangebar'), { onChange: setZoom, onEnd: () =>
 let lastShadow = null;
 
 let resizeTimer;
-window.addEventListener('resize', () => {
+const onResize = () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { resizeCharts(); rangeBar.update({ redraw: true }); placePendingLine(); }, 150);
-});
+};
+window.addEventListener('resize', onResize);
+// The charts' width also changes without the window's: a scroll bar appearing when a chart is added,
+// for one. The charts would then stick out on the right.
+let chartsWidth = 0;
+new ResizeObserver(([e]) => {
+  const w = Math.round(e.contentRect.width);
+  if (w !== chartsWidth) { chartsWidth = w; onResize(); }
+}).observe($('charts'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderResults());
 
 // ---------- Boot ----------
