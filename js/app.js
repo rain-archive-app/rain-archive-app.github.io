@@ -1,14 +1,14 @@
 ﻿import {
-  VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=116';
+  VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
+} from './vars.js?v=119';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=116';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=116';
-import { createRangeBar } from './rangebar.js?v=116';
-import { initAccount, pushFavorites } from './account.js?v=116';
+} from './data.js?v=119';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=119';
+import { createRangeBar } from './rangebar.js?v=119';
+import { initAccount, pushFavorites } from './account.js?v=119';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1620,6 +1620,60 @@ function modelUsedText(keys, S, E) {
   return t;
 }
 
+// The "i" after a variable's name: where its values come from, over the period on screen.
+const SOURCE_NAMES = {
+  era5: 'ERA5 (ECMWF reanalysis, ~25 km)',
+  land: 'ERA5-Land (ECMWF land reanalysis, ~9 km)',
+  mix: 'ERA5 and ERA5-Land (derived from both)',
+};
+const KIND_TEXT = {
+  sum: 'Amount over each hour: the bars add the hours up, and the totals add the bars up.',
+  mean: 'Value at each hour: a bar shows the mean of its hours.',
+  dir: 'Direction at each hour: a bar shows the average direction of its hours.',
+  code: 'WMO weather code at each hour: a bar shows the most severe one.',
+};
+function showVarInfo(key) {
+  const v = VAR_BY_KEY[key];
+  const unit = displayUnit(v, state.units);
+  const z = raw?.tz || tz();
+  const vS = zoomWin ? unwall(zoomWin.startMs) : rawWindow?.S, vE = zoomWin ? unwall(zoomWin.endMs) : rawWindow?.E;
+  const now = nowHour();
+  const rows = [];
+  const add = (head, text) => rows.push(`<dt>${head}</dt><dd>${text}</dd>`);
+  add('Variable', `${v.label} · <code>${v.key}</code> · ${unit}`);
+  add('Values', KIND_TEXT[v.kind]);
+  // Past: the archive, by date when "Auto" switches models in 2017.
+  const model = period?.model || state.model;
+  if (model !== 'best_match') {
+    const m = MODELS.find((x) => x.id === model);
+    add('Past', `${m.label}. ${m.note}`);
+  } else {
+    const before = SOURCE_NAMES[pre2017Source(key)];
+    const parts = [];
+    if (vS == null || vS < IFS_FROM) parts.push(`until 31 Dec 2016: ${before}`);
+    if (vE == null || vE > IFS_FROM) parts.push(`from 2017: ECMWF IFS analysis (~9 km)`);
+    add('Past', `Open-Meteo historical weather, “Auto”: ${parts.join('; ')}.`
+      + (period?.filledHours ? ` The last ${period.filledHours} h, not yet in the archive, come from the forecast.` : ''));
+  }
+  // Future: the forecast and its likely range.
+  if (vE == null || vE > now) {
+    let f = 'Open-Meteo forecast, its best model for this place (up to 15 days ahead).';
+    if (['sum', 'mean'].includes(v.kind)) {
+      f += ' Shaded range: between the 10th and 90th percentiles of the 51 runs of the ECMWF ensemble (~25 km).';
+      if (v.kind === 'mean') f += ' For values that are not added up, only the spread of the runs is used, centred on the forecast.';
+      if (key === 'snowfall' || key === 'snow_depth') f += ' In the mountains its cells lie higher (colder) than the place: it can give snow where the forecast gives rain.';
+    }
+    add('Forecast', f);
+  }
+  add('Place', `${state.loc?.name || '–'} · ${state.loc ? `${state.loc.lat.toFixed(3)}°, ${state.loc.lon.toFixed(3)}°` : ''} · times in ${z}`);
+  add('More', '<a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo documentation</a> (CC BY 4.0)');
+  $('var-info-title').textContent = v.label;
+  $('var-info-body').innerHTML = `<dl>${rows.join('')}</dl>`;
+  $('var-info').showModal();
+}
+$('var-info-close').onclick = () => $('var-info').close();
+$('var-info').addEventListener('click', (e) => { if (e.target === $('var-info')) $('var-info').close(); });
+
 // ---------- Uncertainty of the forecast ----------
 // The ensemble runs are heavy and only serve the future: downloaded when the future comes on screen,
 // kept for an hour.
@@ -1723,7 +1777,7 @@ function renderResults() {
   $('btn-fullscreen').hidden = false;
   const modeBtn = $('btn-chart-mode');
   const combined = state.chartMode === 'combined';
-  modeBtn.hidden = keys.length < 2;
+  modeBtn.hidden = allKeys.length < 2;
   modeBtn.setAttribute('aria-pressed', combined);
   modeBtn.title = combined ? 'Separate charts' : 'Combine charts';
   modeBtn.setAttribute('aria-label', modeBtn.title);
@@ -1749,7 +1803,8 @@ function renderResults() {
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
-  renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
+  // Hidden variables count too: hiding some must not switch the layout (the titles would move).
+  renderCharts($('charts'), agg, keys, state.agg, allKeys.length < 2 ? 'stacked' : state.chartMode,
     { allKeys, statRange: dates && endIdx >= 0 ? { i0: dates.i0, i1: dates.i1 } : null, range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the end of the last bar (where the end mark sits), kept on screen.
       endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.end[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
@@ -1925,6 +1980,7 @@ $('charts').addEventListener('click', (e) => {
   const tool = e.target.closest('.var-tool');
   const key = tool?.closest('.chart-title')?.dataset.key;
   if (!key || tool.disabled) return;
+  if (tool.classList.contains('var-info')) { showVarInfo(key); return; }
   if (tool.classList.contains('var-hide')) {
     if (hiddenVars.has(key)) hiddenVars.delete(key); else hiddenVars.add(key);
   } else {

@@ -376,10 +376,17 @@ dialog.confirm { height: auto; width: min(380px, calc(100vw - 32px)); padding: 1
 dialog.confirm p { margin: 0 0 8px; }
 .confirm-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog.var-info { width: min(440px, calc(100vw - 32px)); height: fit-content; max-height: calc(100vh - 32px); overflow: auto; }
+dialog.var-info[open] { display: block; }
+dialog.var-info .dialog-head { padding: 0 0 8px; }
+.var-info dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; line-height: 1.4; }
+.var-info dt { font-weight: 600; color: var(--text); }
+.var-info dd { margin: 0; color: var(--muted); }
+.var-info code { font-size: 11px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
 .dialog-head, .dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; }
 #map { flex: 1; min-height: 200px; }
 /* Layers button: same 30 px square as the zoom buttons */
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=116"); }
+  background-image: url("../icons/mapbox-logo.svg?v=119"); }

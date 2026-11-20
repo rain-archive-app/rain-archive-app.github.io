@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=116';
-import { fmtWall, STEP_MS } from './data.js?v=116';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=119';
+import { fmtWall, STEP_MS } from './data.js?v=119';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -249,6 +249,7 @@ function attachTouch(chart, el) {
 const EYE = '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_OFF = `${EYE}<path d="M4 4l16 16"/>`;
 const BIN = '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/>';
+const INFO = '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r=".6" fill="currentColor"/>';
 function titleEl(key, color, t = {}) {
   const el = document.createElement('div');
   el.className = 'chart-title' + (t.hidden ? ' is-hidden' : '');
@@ -256,22 +257,23 @@ function titleEl(key, color, t = {}) {
   el.innerHTML = '<span class="dot"></span><span class="name"></span>';
   el.querySelector('.dot').style.background = color;
   el.querySelector('.name').textContent = VAR_BY_KEY[key].label;
+  const label = VAR_BY_KEY[key].label;
+  const icon = (cls, svg, title, disabled) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `var-tool ${cls}`;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.disabled = !!disabled;
+    b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>`;
+    return b;
+  };
   if (t.tools) {
-    const label = VAR_BY_KEY[key].label;
-    const icon = (cls, svg, title, disabled) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `var-tool ${cls}`;
-      b.title = title;
-      b.setAttribute('aria-label', title);
-      b.disabled = !!disabled;
-      b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>`;
-      return b;
-    };
     el.append(
       icon('var-hide', t.hidden ? EYE_OFF : EYE, t.hidden ? `Show ${label}` : `Hide ${label}`, t.lastShown),
       icon('var-del', BIN, `Remove ${label}`));
   }
+  el.append(icon('var-info', INFO, `Where the ${label.toLowerCase()} data come from`)); // always, even alone
   return el;
 }
 
