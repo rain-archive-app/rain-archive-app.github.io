@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=154';
+} from './vars.js?v=156';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
-  DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=154';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=154';
-import { createRangeBar } from './rangebar.js?v=154';
-import { initAccount, pushFavorites, isSignedIn } from './account.js?v=154';
+  DURATION_UNITS, subtractDuration, bestDuration, apiUsage, API_LIMITS,
+} from './data.js?v=156';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=156';
+import { createRangeBar } from './rangebar.js?v=156';
+import { initAccount, pushFavorites, isSignedIn } from './account.js?v=156';
 
 const $ = (id) => document.getElementById(id);
 
@@ -2087,7 +2087,8 @@ async function downloadCharts(format) {
   try {
     await exportCharts($('charts'), format, {
       heading: `${place} · ${lab(zoomWin.startMs)} → ${lab(zoomWin.endMs)}`,
-      credit: 'Rain Archive · Weather data by Open-Meteo.com (CC BY 4.0)',
+      // The credit splits at its " · " onto several lines when the image is narrow.
+      credit: 'Rain Archive · Weather data: Open-Meteo.com (CC BY 4.0) · ECMWF (CC BY 4.0) · Copernicus Climate Change Service (ERA5)',
       marks,
       filename: `rain-archive_${place.replace(/[^\p{L}\p{N}]+/gu, '-')}_${day(zoomWin.startMs)}_${day(zoomWin.endMs)}`,
     });
@@ -2165,6 +2166,22 @@ initAccount({
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
 }
+
+// ---------- Open-Meteo calls from this browser ----------
+// Under "Advanced: data source": the calls of the last minute, hour and 24 hours against the free
+// limits, which apply to each user (IP address), not to the whole app.
+function renderApiUsage() {
+  const u = apiUsage();
+  const rows = [['Last minute', u.minute, API_LIMITS.minute], ['Last hour', u.hour, API_LIMITS.hour], ['Last 24 h', u.day, API_LIMITS.day]];
+  $('api-usage').innerHTML = rows.map(([label, n, max]) => {
+    const pct = Math.min(100, (n / max) * 100);
+    return `<span>${label}</span><span class="bar"><span class="${pct > 80 ? 'high' : ''}" style="width:${pct}%"></span></span>`
+      + `<span class="n">${n.toLocaleString('en')} / ${max.toLocaleString('en')}</span>`;
+  }).join('');
+}
+addEventListener('api-call', renderApiUsage);
+setInterval(() => { if (!$('card-data').hidden) renderApiUsage(); }, 15e3); // the windows move on
+renderApiUsage();
 
 // ---------- New version ----------
 // The version running is the ?v= of this script; the one online is in sw.js on the server. When the

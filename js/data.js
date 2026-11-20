@@ -1,5 +1,5 @@
 ﻿// Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=154';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=156';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -134,7 +134,40 @@ export function fmtDuration(hours) {
 
 // ---------- HTTP ----------
 
+// ---------- Use of the Open-Meteo API from this browser ----------
+// The free API allows about 600 calls a minute, 5,000 an hour and 10,000 a day, per IP address
+// (so per user, not for the whole app). A heavy request counts as several calls: here as Open-Meteo
+// describes it, one call per 10 variables and per 2 weeks of data, rounded up (an estimate).
+const USAGE_KEY = 'rain-archive-api-calls';
+export const API_LIMITS = { minute: 600, hour: 5000, day: 10000 };
+function callWeight(url) {
+  const q = new URL(url).searchParams;
+  const vars = (q.get('hourly') || '').split(',').filter(Boolean).length;
+  let days = Number(q.get('forecast_days')) || 1;
+  if (q.get('start_date') && q.get('end_date')) days = (Date.parse(q.get('end_date')) - Date.parse(q.get('start_date'))) / 86400e3 + 1;
+  return Math.max(1, Math.ceil(vars / 10)) * Math.max(1, Math.ceil(days / 14));
+}
+function noteCall(url) {
+  if (!/open-meteo\.com/.test(url)) return;
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch { /* ignore */ }
+  const now = Date.now();
+  list = list.filter(([t]) => now - t < 86400e3);
+  list.push([now, callWeight(url)]);
+  try { localStorage.setItem(USAGE_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+  dispatchEvent(new Event('api-call'));
+}
+// Calls (weighted) from this browser over the last minute, hour and 24 hours.
+export function apiUsage() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch { /* ignore */ }
+  const now = Date.now();
+  const sum = (ms) => list.reduce((s, [t, w]) => s + (now - t < ms ? w : 0), 0);
+  return { minute: sum(60e3), hour: sum(3600e3), day: sum(86400e3) };
+}
+
 async function getJSON(url, signal) {
+  noteCall(url);
   let res;
   try {
     res = await fetch(url, { signal });
