@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=153';
+} from './vars.js?v=154';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=153';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=153';
-import { createRangeBar } from './rangebar.js?v=153';
-import { initAccount, pushFavorites, isSignedIn } from './account.js?v=153';
+} from './data.js?v=154';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=154';
+import { createRangeBar } from './rangebar.js?v=154';
+import { initAccount, pushFavorites, isSignedIn } from './account.js?v=154';
 
 const $ = (id) => document.getElementById(id);
 
