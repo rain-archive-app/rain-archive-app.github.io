@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=107';
+} from './vars.js?v=108';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=107';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=107';
-import { createRangeBar } from './rangebar.js?v=107';
-import { initAccount, pushFavorites } from './account.js?v=107';
+} from './data.js?v=108';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=108';
+import { createRangeBar } from './rangebar.js?v=108';
+import { initAccount, pushFavorites } from './account.js?v=108';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1168,6 +1168,7 @@ function onChartZoom(z) {
   rangeBar.update({ start: z.startMs, end: z.endMs });
   placePendingLine();
   closeMarkMenu();
+  syncArrows();
   const own = snapped && Math.abs(z.startMs - snapped.startMs) < 1e3 && Math.abs(z.endMs - snapped.endMs) < 1e3;
   if (own) return; // relayout is already running
   snapped = null;
@@ -1349,6 +1350,7 @@ function showPendingMark() {
     : 'Set the range of the totals: click here, then click its start and its end on the chart';
   $('charts').classList.toggle('drawing-marks', drawingMarks);
   placePendingLine();
+  syncArrows();
   // The running totals follow the marks at once, redrawn at most once per frame.
   const key = `${start}|${end}`;
   if (key !== marksDrawn) {
@@ -1812,10 +1814,26 @@ function syncTargets() {
   const V = targets.view, T = targets.totals && sum;
   // The view alone can only be centred on totals that exist.
   $('btn-center-view').disabled = !T && !(V && sum && hasTotals());
-  $('btn-view-totals').disabled = !(sum && hasTotals());
-  $('btn-totals-view').disabled = !sum;
   $('btn-center-view').title = T ? 'Center the range of the totals on the view, same length'
     : 'Center the view on the range of the totals, same width';
+  syncArrows();
+}
+
+// View and totals are "together" after a button acted on both (or an arrow); moving either one on the
+// chart, the time bar or the marks sets them apart, and only then do the round arrows show.
+let linkSig = null;
+function viewTotalsSig() {
+  if (!raw || !rawWindow || !zoomWin || !hasTotals()) return null;
+  return [zoomWin.startMs, zoomWin.endMs, ...totalsRange()].join('|');
+}
+function linkTogether() { linkSig = viewTotalsSig(); syncArrows(); }
+function syncArrows() {
+  const sig = viewTotalsSig();
+  const apart = hasSumVar() && sig != null && sig !== linkSig;
+  for (const id of ['btn-view-totals', 'btn-totals-view']) {
+    $(id).classList.toggle('off', !apart);
+    $(id).disabled = !apart;
+  }
 }
 for (const [id, key, other] of [['tgt-view', 'view', 'totals'], ['tgt-totals', 'totals', 'view']]) {
   $(id).onclick = () => {
@@ -1840,7 +1858,12 @@ function nowWindow(len) {
 }
 
 // Sets the range of the totals (tot: [start, end] wall ms) and/or the view (win), then highlights `active`.
-async function setTargets(tot, win, active) {
+// link: the view and the totals are set together (both targets on, an arrow, the opening).
+async function setTargets(tot, win, active, link = false) {
+  await moveTargets(tot, win, active);
+  if (link) linkTogether(); else syncArrows();
+}
+async function moveTargets(tot, win, active) {
   if (tot) {
     pendingMarks = { start: tot[0], end: tot[1] };
     if (!win) { await placeMarks(tot[0], tot[1]); setActiveView(active); return; }
@@ -1860,20 +1883,21 @@ async function toolbarAction(kind) {
   const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz), now = wallMs(nowHour(), raw.tz);
   const span = zoomWin.endMs - zoomWin.startMs, mid = (zoomWin.startMs + zoomWin.endMs) / 2;
   const around = (t) => windowAround((t[0] + t[1]) / 2, (t[1] - t[0]) * 1.2);
+  const L = V && T; // both targets: the view and the totals end up together
   if (kind === 'period') {
     if (!T) return applyView('period');
     const tot = [S, E];
-    return setTargets(tot, V ? around(tot) : null, 'period');
+    return setTargets(tot, V ? around(tot) : null, 'period', L);
   }
   if (kind === 'now') {
-    // Totals: from the start already chosen up to now (a start in the future would leave nothing to
-    // add up). View: same width, with now in the middle.
+    // Both centred on now, each keeping its length (the totals: one day if there are none yet).
     let tot = null;
     if (T) {
-      const start = pendingMarks.start ?? S;
-      tot = [start < now ? start : now - (E - S), now];
+      const len = hasTotals() ? totalsRange()[1] - totalsRange()[0] : 24 * HOUR_MS;
+      const a = Math.min(snapMark(now - len / 2), snapMark(endMax() - len));
+      tot = [a, snapMark(a + len)];
     }
-    return setTargets(tot, V ? nowWindow(span) : null, 'now');
+    return setTargets(tot, V ? nowWindow(span) : null, 'now', L);
   }
   if (kind === 'center') {
     if (T) {
@@ -1898,7 +1922,7 @@ async function toolbarAction(kind) {
   let a = snapMark(mid - len / 2);
   a = Math.min(a, snapMark(endMax() - len));
   const tot = [a, a + len];
-  return setTargets(tot, V ? windowAround(mid, len * 1.2) : null, kind);
+  return setTargets(tot, V ? windowAround(mid, len * 1.2) : null, kind, L);
 }
 document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
   b.onclick = () => toolbarAction(b.dataset.view);
@@ -1909,22 +1933,22 @@ $('btn-center-view').onclick = () => toolbarAction('center');
 $('btn-view-totals').onclick = () => {
   if (!raw || !zoomWin) return;
   const [a, z] = totalsRange();
-  setTargets(null, windowAround((a + z) / 2, (z - a) * 1.2), null);
+  setTargets(null, windowAround((a + z) / 2, (z - a) * 1.2), null, true);
 };
 $('btn-totals-view').onclick = () => {
   if (!raw || !zoomWin) return;
   const mid = (zoomWin.startMs + zoomWin.endMs) / 2, len = (zoomWin.endMs - zoomWin.startMs) / 1.2;
   const a = snapMark(mid - len / 2), z = snapMark(mid + len / 2);
-  if (z > a) setTargets([a, z], null, null);
+  if (z > a) setTargets([a, z], null, null, true);
 };
 
-// At the opening of a period that ends now: the view keeps the period's length with now at two
-// thirds of it, and the totals run over the last day.
+// At the opening of a period that ends now: the view keeps the period's length with now in its
+// middle, and the totals run over the last day.
 async function startAtNow() {
   const now = wallMs(nowHour(), raw.tz);
   const len = wallMs(rawWindow.E, raw.tz) - wallMs(rawWindow.S, raw.tz);
   const tot = hasSumVar() ? [snapMark(now - 24 * HOUR_MS), snapMark(now)] : null;
-  await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null);
+  await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null, true);
 }
 // Clicking a variable's title removes it, unless it is the last one.
 $('charts').addEventListener('click', (e) => {

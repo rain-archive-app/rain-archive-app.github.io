@@ -193,16 +193,20 @@ details.sub > summary { font-weight: 400; }
 /* One row: the two targets (view, totals), then the buttons that act on the targets switched on. */
 .view-btns { display: flex; flex-wrap: wrap; align-items: center; }
 .period-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.view-btns .btn.target { color: var(--muted); background: none; border-color: transparent; }
-.view-btns .btn.target[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+/* Targets: plain icons, dark blue when on, light blue when off. */
+.view-btns .btn.target, .view-btns .btn.target[aria-pressed] { background: none; border-color: transparent; box-shadow: none;
+  color: color-mix(in srgb, var(--accent) 40%, var(--card)); }
+.view-btns .btn.target[aria-pressed="true"] { color: var(--accent); }
+.view-btns .btn.target svg { width: 21px; height: 21px; }
 .view-btns .btn.target svg { stroke-width: 2.2; overflow: visible; }
 .view-btns .btn.target svg .thin { stroke-width: 1.2; }
 .view-btns .btn.target svg .fill { fill: currentColor; stroke: none; }
-/* The two targets and their round arrows, in a box of their own, apart from the action buttons. */
+/* The two targets and their round arrows, set apart from the action buttons. */
 .tgt-group {
   display: grid; grid-template-columns: auto auto; gap: 0 3px; align-items: center;
-  padding: 0 4px; margin-right: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  margin-right: 14px;
 }
+.tgt-group .swap.off { visibility: hidden; } /* only while the view and the totals are apart */
 .tgt-group .swap { grid-column: 1 / span 2; display: block; width: 0; min-width: 100%; padding: 0; /* the icons set the width */ border: 0; background: none; cursor: pointer;
   color: color-mix(in srgb, var(--accent) 45%, var(--card)); line-height: 0; }
 .tgt-group .swap:hover { color: var(--accent); }
@@ -376,4 +380,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=107"); }
+  background-image: url("../icons/mapbox-logo.svg?v=108"); }
