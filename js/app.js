@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=105';
+} from './vars.js?v=107';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=105';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=105';
-import { createRangeBar } from './rangebar.js?v=105';
-import { initAccount, pushFavorites } from './account.js?v=105';
+} from './data.js?v=107';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=107';
+import { createRangeBar } from './rangebar.js?v=107';
+import { initAccount, pushFavorites } from './account.js?v=107';
 
 const $ = (id) => document.getElementById(id);
 
@@ -957,6 +957,7 @@ async function doFetch() {
     zoomWin = viewWindow('period');
     renderResults();
     setActiveView('period');
+    if (state.otherMode === 'end' && state.endNow) await startAtNow(); // now in the middle, totals over the last day
     fillAxis(); // the margins, in the background
     refreshScales();
   } catch (e) {
@@ -1276,9 +1277,7 @@ async function applyView(view) {
   setActiveView(view);
 }
 
-document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
-  b.onclick = () => { if (raw) applyView(b.dataset.view); };
-});
+// data-view buttons: see toolbarAction (they act on the view, the totals, or both).
 
 // ---------- In / out marks ----------
 // Drag the start mark and the end mark from the toolbar and drop them on a chart or on the time bar:
@@ -1740,10 +1739,7 @@ function renderResults() {
     totalIdx = seen ? dates.i1 : -1;
     endIdx = seen ? Math.min(vis.i1, dates.i1) : -1;
   }
-  const hasSum = keys.some((k) => VAR_BY_KEY[k].kind === 'sum');
-  document.querySelectorAll('#view-btns button[data-total], #btn-view-totals').forEach((b) => { b.disabled = !hasSum; });
-  // Nothing to centre on while the totals simply follow the view.
-  $('btn-center-view').disabled = !hasSum || !(totalsFixed || (pendingMarks.start != null && pendingMarks.end != null));
+  syncTargets();
   // The axis keeps its time range whatever the aggregation: wide bars at its ends are simply cut.
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
@@ -1799,43 +1795,137 @@ function totalsRange() {
   const a = pendingMarks.start ?? S, z = pendingMarks.end ?? E;
   return z > a ? [a, z] : [S, E];
 }
-// View row: same length of view, around the middle of that range, on a whole hour.
-$('btn-center-view').onclick = () => {
+// ---------- Toolbar targets ----------
+// The eye and the chart icon choose what the buttons after them act on: the view, the range of the
+// totals, or both (the default at each opening). At least one stays on. With both on, the view
+// covers 120 % of the new range of the totals, around it.
+const targets = { view: true, totals: true };
+const HOUR_MS = 3600e3;
+const hasSumVar = () => state.vars.some((k) => VAR_BY_KEY[k]?.kind === 'sum');
+const hasTotals = () => totalsFixed || (pendingMarks.start != null && pendingMarks.end != null);
+
+function syncTargets() {
+  const sum = hasSumVar();
+  $('tgt-view').setAttribute('aria-pressed', targets.view);
+  $('tgt-totals').setAttribute('aria-pressed', targets.totals && sum);
+  $('tgt-totals').disabled = !sum;
+  const V = targets.view, T = targets.totals && sum;
+  // The view alone can only be centred on totals that exist.
+  $('btn-center-view').disabled = !T && !(V && sum && hasTotals());
+  $('btn-view-totals').disabled = !(sum && hasTotals());
+  $('btn-totals-view').disabled = !sum;
+  $('btn-center-view').title = T ? 'Center the range of the totals on the view, same length'
+    : 'Center the view on the range of the totals, same width';
+}
+for (const [id, key, other] of [['tgt-view', 'view', 'totals'], ['tgt-totals', 'totals', 'view']]) {
+  $(id).onclick = () => {
+    targets[key] = !targets[key];
+    if (!targets[key] && !(targets[other] && (other === 'view' || hasSumVar()))) targets[other] = true; // never both off
+    syncTargets();
+  };
+}
+
+const endMax = () => wallMs(lastHour(), raw.tz); // the end of the forecast
+const roundH = (ms) => Math.round(ms / HOUR_MS) * HOUR_MS;
+// A window of length `len` around `mid`, on whole hours, not past the end of the forecast.
+function windowAround(mid, len) {
+  const start = roundH(Math.min(mid - len / 2, endMax() - len));
+  return { startMs: start, endMs: start + roundH(len) };
+}
+// The view with `now` in its middle.
+function nowWindow(len) {
+  const now = wallMs(nowHour(), raw.tz);
+  const start = roundH(Math.min(now - len / 2, endMax() - len));
+  return { startMs: start, endMs: start + roundH(len) };
+}
+
+// Sets the range of the totals (tot: [start, end] wall ms) and/or the view (win), then highlights `active`.
+async function setTargets(tot, win, active) {
+  if (tot) {
+    pendingMarks = { start: tot[0], end: tot[1] };
+    if (!win) { await placeMarks(tot[0], tot[1]); setActiveView(active); return; }
+    // The marks stay on screen.
+    const m = (tot[1] - tot[0]) * 0.05;
+    if (tot[0] < win.startMs) win = { ...win, startMs: roundH(tot[0] - m) };
+    if (tot[1] > win.endMs) win = { ...win, endMs: roundH(tot[1] + m) };
+  }
+  await showWindow(win);
+  if (tot) showPendingMark();
+  setActiveView(active);
+}
+
+async function toolbarAction(kind) {
   if (!raw || !zoomWin) return;
-  const [a, z] = totalsRange();
-  const span = zoomWin.endMs - zoomWin.startMs;
-  const start = Math.round(Math.min((a + z - span) / 2, wallMs(lastHour(), raw.tz) - span) / 3600e3) * 3600e3;
-  showWindow({ startMs: start, endMs: start + span });
-};
-// View = totals: exactly the range of the totals on screen.
+  const V = targets.view, T = targets.totals && hasSumVar();
+  const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz), now = wallMs(nowHour(), raw.tz);
+  const span = zoomWin.endMs - zoomWin.startMs, mid = (zoomWin.startMs + zoomWin.endMs) / 2;
+  const around = (t) => windowAround((t[0] + t[1]) / 2, (t[1] - t[0]) * 1.2);
+  if (kind === 'period') {
+    if (!T) return applyView('period');
+    const tot = [S, E];
+    return setTargets(tot, V ? around(tot) : null, 'period');
+  }
+  if (kind === 'now') {
+    // Totals: from the start already chosen up to now (a start in the future would leave nothing to
+    // add up). View: same width, with now in the middle.
+    let tot = null;
+    if (T) {
+      const start = pendingMarks.start ?? S;
+      tot = [start < now ? start : now - (E - S), now];
+    }
+    return setTargets(tot, V ? nowWindow(span) : null, 'now');
+  }
+  if (kind === 'center') {
+    if (T) {
+      // The range of the totals, same length (or the middle 70 % of the view if there is none yet),
+      // around the middle of the view; the view does not move.
+      let a, z;
+      if (!hasTotals()) { a = snapMark(zoomWin.startMs + 0.15 * span); z = snapMark(zoomWin.startMs + 0.85 * span); }
+      else {
+        const [a0, z0] = totalsRange(), len = z0 - a0;
+        a = Math.min(snapMark(mid - len / 2), endMax() - len); z = snapMark(a + len);
+      }
+      return setTargets([a, z], null, null);
+    }
+    // The view, same width, around the middle of the range of the totals.
+    const [a, z] = totalsRange();
+    return setTargets(null, windowAround((a + z) / 2, span), null);
+  }
+  // A duration: the range of the totals takes it, around the middle of the view; the view keeps its
+  // middle and covers 120 % of it (or the duration itself, when it acts on the view alone).
+  const len = Number(kind) * HOUR_MS;
+  if (!T) return setTargets(null, windowAround(mid, len), kind);
+  let a = snapMark(mid - len / 2);
+  a = Math.min(a, snapMark(endMax() - len));
+  const tot = [a, a + len];
+  return setTargets(tot, V ? windowAround(mid, len * 1.2) : null, kind);
+}
+document.querySelectorAll('#view-btns button[data-view]').forEach((b) => {
+  b.onclick = () => toolbarAction(b.dataset.view);
+});
+$('btn-center-view').onclick = () => toolbarAction('center');
+// Round arrows: bring the view and the totals back together after moving one of them on the chart,
+// in the same proportion as the toolbar buttons (the view covers 120 % of the totals, around them).
 $('btn-view-totals').onclick = () => {
   if (!raw || !zoomWin) return;
   const [a, z] = totalsRange();
-  showWindow({ startMs: a, endMs: z });
+  setTargets(null, windowAround((a + z) / 2, (z - a) * 1.2), null);
 };
-document.querySelectorAll('#view-btns button[data-total]').forEach((b) => {
-  b.onclick = () => {
-    if (!raw || !zoomWin) return;
-    const S = wallMs(rawWindow.S, raw.tz), E = wallMs(rawWindow.E, raw.tz), now = wallMs(nowHour(), raw.tz);
-    if (b.dataset.total === 'view') placeMarks(zoomWin.startMs, zoomWin.endMs);
-    else if (b.dataset.total === 'period') placeMarks(S, E);
-    else if (b.dataset.total === 'center' && !totalsFixed && pendingMarks.start == null && pendingMarks.end == null) {
-      // No range yet, so no length to keep: the middle 70 % of the view.
-      const w = zoomWin.endMs - zoomWin.startMs;
-      placeMarks(snapMark(zoomWin.startMs + 0.15 * w), snapMark(zoomWin.startMs + 0.85 * w));
-    } else if (b.dataset.total === 'center') {
-      // Same length, around the middle of the view, without going past the end of the forecast.
-      const [a, z] = totalsRange();
-      const len = z - a;
-      const start = Math.min(snapMark((zoomWin.startMs + zoomWin.endMs - len) / 2), wallMs(lastHour(), raw.tz) - len);
-      placeMarks(start, snapMark(start + len));
-    } else {
-      // From the start already chosen up to now; a start in the future would leave nothing to add up.
-      const start = pendingMarks.start ?? S;
-      placeMarks(start < now ? start : now - (E - S), now);
-    }
-  };
-});
+$('btn-totals-view').onclick = () => {
+  if (!raw || !zoomWin) return;
+  const mid = (zoomWin.startMs + zoomWin.endMs) / 2, len = (zoomWin.endMs - zoomWin.startMs) / 1.2;
+  const a = snapMark(mid - len / 2), z = snapMark(mid + len / 2);
+  if (z > a) setTargets([a, z], null, null);
+};
+
+// At the opening of a period that ends now: the view keeps the period's length with now at two
+// thirds of it, and the totals run over the last day.
+async function startAtNow() {
+  const now = wallMs(nowHour(), raw.tz);
+  const len = wallMs(rawWindow.E, raw.tz) - wallMs(rawWindow.S, raw.tz);
+  const tot = hasSumVar() ? [snapMark(now - 24 * HOUR_MS), snapMark(now)] : null;
+  await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null);
+}
 // Clicking a variable's title removes it, unless it is the last one.
 $('charts').addEventListener('click', (e) => {
   const key = e.target.closest('.chart-title')?.dataset.key;

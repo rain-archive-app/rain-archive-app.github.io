@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=105';
-import { fmtWall, STEP_MS } from './data.js?v=105';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=107';
+import { fmtWall, STEP_MS } from './data.js?v=107';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -259,7 +259,8 @@ export function resizeCharts() {
 // The "Total …" label sits above the end of the running-total line, but must stay between the top
 // and bottom lines of the plot. When there is no room above, it goes below the point, on a 50 %
 // transparent background so it stays readable over the bars (and the other way round at the bottom).
-const LABEL_H = 15; // px, one line of 11 px bold text
+const TOTAL_FS = 13; // px, bold "Total …" label
+const LABEL_H = 18;  // px, one line of it
 function halfTransparent(color) {
   const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
   if (!m) return 'rgba(255,255,255,0.5)';
@@ -297,7 +298,7 @@ function placeTotalLabels() {
 let measureCtx = null;
 export function totalLabelBoxes() {
   measureCtx ??= document.createElement('canvas').getContext('2d');
-  measureCtx.font = `700 11px ${getComputedStyle(document.body).fontFamily}`;
+  measureCtx.font = `700 ${TOTAL_FS}px ${getComputedStyle(document.body).fontFamily}`;
   const boxes = [];
   for (const chart of instances) {
     const dom = chart.getDom().getBoundingClientRect();
@@ -412,7 +413,7 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
         // "Total" and the number, in bold, right above the end of the line (no unit, no background).
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
         // (placeTotalLabels moves it below the point, on a background, when there is no room above)
-        label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: 11,
+        label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: TOTAL_FS,
           backgroundColor: 'transparent', padding: 0,
           formatter: () => endText },
         data: [{ coord: [endX ?? x[endIdx], endVal] }],
@@ -441,7 +442,7 @@ function nowSeries(nowMs, theme) {
   const on = nowMs != null && nowMs < chartRange.max;
   return { name: 'Now', type: 'line', yAxisIndex: 0, data: [], silent: true,
     markLine: { silent: true, symbol: 'none', animation: false, precision: 0,
-      lineStyle: { color: theme.text, type: 'solid', width: 1.5, opacity: 0.7 },
+      lineStyle: { color: theme.text, type: 'solid', width: 2.5, opacity: 0.8 },
       label: { formatter: 'Now', position: 'end', color: theme.text, fontSize: 10, fontWeight: 700 },
       data: on ? [{ xAxis: nowMs }] : [] },
     markArea: { silent: true, animation: false, itemStyle: { color: theme.muted, opacity: 0.08 },

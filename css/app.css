@@ -190,29 +190,25 @@ details.sub > summary { font-weight: 400; }
 #units { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0 10px; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
-/* Two rows on one grid, so that their buttons line up: the view, then the range of the totals. */
-/* Columns 1 to 3: curved arrow, row head, curved arrow; the buttons fill the columns after them. */
-.view-btns { display: grid; grid-template-columns: repeat(11, auto); justify-content: start; }
+/* One row: the two targets (view, totals), then the buttons that act on the targets switched on. */
+.view-btns { display: flex; flex-wrap: wrap; align-items: center; }
 .period-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.row-head {
-  display: grid; place-items: center; width: 28px; height: 28px; align-self: center; color: var(--accent);
+.view-btns .btn.target { color: var(--muted); background: none; border-color: transparent; }
+.view-btns .btn.target[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.view-btns .btn.target svg { stroke-width: 2.2; overflow: visible; }
+.view-btns .btn.target svg .thin { stroke-width: 1.2; }
+.view-btns .btn.target svg .fill { fill: currentColor; stroke: none; }
+/* The two targets and their round arrows, in a box of their own, apart from the action buttons. */
+.tgt-group {
+  display: grid; grid-template-columns: auto auto; gap: 0 3px; align-items: center;
+  padding: 0 4px; margin-right: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
 }
-.row-head.view-head { grid-column: 2; grid-row: 1; }
-.row-head.total-head { grid-column: 2; grid-row: 2; }
-.row-head svg { width: 18px; height: 18px; overflow: visible; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-.row-head svg .thin { stroke-width: 1.2; }
-.row-head svg .fill { fill: currentColor; stroke: none; }
-.swap {
-  grid-row: 1 / span 2; align-self: stretch; width: 14px; padding: 0; border: 0; background: none; cursor: pointer;
-  color: color-mix(in srgb, var(--accent) 45%, var(--card)); /* light blue (#a5c5ed on white), full blue on hover */
-}
-.swap:hover { color: var(--accent); }
-.swap svg { overflow: visible; }
-.swap.left { grid-column: 1; }
-.swap.right { grid-column: 3; margin-right: 4px; }
-.swap svg { width: 14px; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.swap svg .head { fill: currentColor; }
-.swap:disabled { opacity: .3; cursor: default; }
+.tgt-group .swap { grid-column: 1 / span 2; display: block; width: 0; min-width: 100%; padding: 0; /* the icons set the width */ border: 0; background: none; cursor: pointer;
+  color: color-mix(in srgb, var(--accent) 45%, var(--card)); line-height: 0; }
+.tgt-group .swap:hover { color: var(--accent); }
+.tgt-group .swap:disabled { opacity: .3; cursor: default; }
+.tgt-group .swap svg { width: 100%; height: auto; overflow: visible; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.tgt-group .swap svg .head { fill: currentColor; stroke: none; }
 .view-btns .btn.small { padding: 2px; font-size: 11.5px; min-width: 24px; }
 .view-btns { gap: 2px; }
 .view-btns .btn.icon { width: 24px !important; }
@@ -338,7 +334,7 @@ details.sub > summary { font-weight: 400; }
 }
 .rb-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rb-ticks line { stroke: var(--chart-grid); stroke-width: 1; }
-.rb-ticks line.rb-now { stroke: var(--text); stroke-width: 2; }
+.rb-ticks line.rb-now { stroke: var(--text); stroke-width: 3; }
 .rb-shadow { fill: var(--accent); opacity: .22; }
 .rb-thumb {
   position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -380,4 +376,4 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=105"); }
+  background-image: url("../icons/mapbox-logo.svg?v=107"); }
