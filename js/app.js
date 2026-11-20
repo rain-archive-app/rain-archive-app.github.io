@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, decimals, wmoLabel, compass,
-} from './vars.js?v=111';
+} from './vars.js?v=112';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=111';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=111';
-import { createRangeBar } from './rangebar.js?v=111';
-import { initAccount, pushFavorites } from './account.js?v=111';
+} from './data.js?v=112';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes } from './charts.js?v=112';
+import { createRangeBar } from './rangebar.js?v=112';
+import { initAccount, pushFavorites } from './account.js?v=112';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1688,9 +1688,14 @@ function restartRunningTotals(agg, vis, last = Infinity) {
   }
 }
 
+// Variables whose chart is hidden with the eye of their title (they stay selected).
+const hiddenVars = new Set();
+
 function renderResults() {
   if (!raw || !period) return false;
-  const keys = state.vars.filter((k) => k in raw.values);
+  const allKeys = state.vars.filter((k) => k in raw.values);
+  let keys = allKeys.filter((k) => !hiddenVars.has(k));
+  if (!keys.length) { hiddenVars.clear(); keys = allKeys; } // never all hidden
   if (typeof echarts === 'undefined') { setStatus('Chart library could not be loaded (offline?).', 'error'); return false; }
   $('view-btns').hidden = false;
   document.querySelectorAll('#view-btns button').forEach((b) => { b.disabled = !keys.length; });
@@ -1718,7 +1723,7 @@ function renderResults() {
   modeBtn.title = combined ? 'Separate charts' : 'Combine charts';
   modeBtn.setAttribute('aria-label', modeBtn.title);
 
-  const agg = aggregate(raw, keys, state.agg, state.units);
+  const agg = aggregate(raw, allKeys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;
   // The running total is only drawn once its range is set: both marks on the chart, or the period
   // fixed from the Period tab. It runs between them whatever the view, and its value is written at
@@ -1728,7 +1733,7 @@ function renderResults() {
   let dates = totalsFixed ? barsBetween(agg, wallMs(rawWindow.S, raw.tz), wallMs(rawWindow.E, raw.tz)) : null;
   if (markS != null && markE != null) dates = barsBetween(agg, markS, markE);
   restartRunningTotals(agg, dates, dates?.i1);
-  addEnsembleBands(agg, raw, ens.key === ensKey(keys) ? ens.data : null, keys, state.units, dates ? dates.i0 : 0);
+  addEnsembleBands(agg, raw, ens.key === ensKey(allKeys) ? ens.data : null, allKeys, state.units, dates ? dates.i0 : 0);
   let endIdx = -1, totalIdx = -1;
   if (dates) {
     const seen = vis && vis.i0 <= dates.i1 && vis.i1 >= dates.i0;
@@ -1740,12 +1745,9 @@ function renderResults() {
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   renderCharts($('charts'), agg, keys, state.agg, keys.length < 2 ? 'stacked' : state.chartMode,
-    { range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
+    { allKeys, statRange: dates && endIdx >= 0 ? { i0: dates.i0, i1: dates.i1 } : null, range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the end of the last bar (where the end mark sits), kept on screen.
       endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.end[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });
-  const removable = state.vars.length > 1;
-  $('charts').classList.toggle('vars-removable', removable);
-  $('charts').querySelectorAll('.chart-title').forEach((t) => { t.title = removable ? 'Click to remove from the charts' : ''; });
   // Time bar: the axis range, the visible window, and the first variable's profile.
   $('rangebar').hidden = false;
   lastShadow = agg.x.map((x, i) => [x, agg.series[keys[0]].val[i]]);
@@ -1754,7 +1756,7 @@ function renderResults() {
 
   $('model-used').textContent = modelUsedText(keys, rawWindow.S, rawWindow.E) + forecastText();
   placePendingLine();
-  refreshEnsemble(keys);
+  refreshEnsemble(allKeys);
   return true;
 }
 
@@ -1913,14 +1915,21 @@ async function startAtNow() {
   const tot = hasSumVar() ? [snapMark(now - 24 * HOUR_MS), snapMark(now)] : null;
   await setTargets(tot && tot[1] > tot[0] ? tot : null, nowWindow(len), null);
 }
-// Clicking a variable's title removes it, unless it is the last one.
+// The eye of a variable's title hides or shows its chart; the bin removes the variable (never the last one).
 $('charts').addEventListener('click', (e) => {
-  const key = e.target.closest('.chart-title')?.dataset.key;
-  if (!key || state.vars.length < 2) return;
-  state.vars = state.vars.filter((k) => k !== key);
-  save();
-  renderVars();
-  renderUnits();
+  const tool = e.target.closest('.var-tool');
+  const key = tool?.closest('.chart-title')?.dataset.key;
+  if (!key || tool.disabled) return;
+  if (tool.classList.contains('var-hide')) {
+    if (hiddenVars.has(key)) hiddenVars.delete(key); else hiddenVars.add(key);
+  } else {
+    if (state.vars.length < 2) return;
+    state.vars = state.vars.filter((k) => k !== key);
+    hiddenVars.delete(key);
+    save();
+    renderVars();
+    renderUnits();
+  }
   renderResults();
 });
 $('btn-chart-mode').onclick = () => {

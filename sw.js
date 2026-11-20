@@ -1,7 +1,7 @@
 ﻿// Service worker: cache the app shell and CDN libraries; weather/geocoding APIs always go to the network.
 // Bump VERSION together with the ?v= tags in index.html and the js imports.
-const VERSION = 'rain-archive-v111';
-const V = '?v=111';
+const VERSION = 'rain-archive-v112';
+const V = '?v=112';
 const SHELL = [
   './',
   'index.html',

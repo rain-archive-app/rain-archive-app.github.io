@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=111';
-import { fmtWall, STEP_MS } from './data.js?v=111';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=112';
+import { fmtWall, STEP_MS } from './data.js?v=112';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -226,14 +226,34 @@ function attachTouch(chart, el) {
 
 // ---------- Titles, tooltip ----------
 
-// Title: just "● Rain" (the total is written on the running-total line).
-function titleEl(key, color) {
+// Title: just "● Rain" (the total is written on the running-total line). With several variables, an
+// eye (show / hide its chart) and a bin (remove it) follow the name.
+const EYE = '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_OFF = `${EYE}<path d="M4 4l16 16"/>`;
+const BIN = '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/>';
+function titleEl(key, color, t = {}) {
   const el = document.createElement('div');
-  el.className = 'chart-title';
+  el.className = 'chart-title' + (t.hidden ? ' is-hidden' : '');
   el.dataset.key = key;
   el.innerHTML = '<span class="dot"></span><span class="name"></span>';
   el.querySelector('.dot').style.background = color;
   el.querySelector('.name').textContent = VAR_BY_KEY[key].label;
+  if (t.tools) {
+    const label = VAR_BY_KEY[key].label;
+    const icon = (cls, svg, title, disabled) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `var-tool ${cls}`;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.disabled = !!disabled;
+      b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>`;
+      return b;
+    };
+    el.append(
+      icon('var-hide', t.hidden ? EYE_OFF : EYE, t.hidden ? `Show ${label}` : `Hide ${label}`, t.lastShown),
+      icon('var-del', BIN, `Remove ${label}`));
+  }
   return el;
 }
 
@@ -267,28 +287,55 @@ function halfTransparent(color) {
   const n = parseInt(m[1], 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},0.5)`;
 }
+// Several totals on one chart (combined charts) never overlap: a label that would cover another one
+// already placed moves down below it (or up above it when there is no room left below).
+function labelWidth(text) {
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  measureCtx.font = `700 ${TOTAL_FS}px ${getComputedStyle(document.body).fontFamily}`;
+  return measureCtx.measureText(text).width + 6;
+}
 function placeTotalLabels() {
   const bg = halfTransparent(css('--card'));
   for (const chart of instances) {
     const o = chart.getOption();
     const rect = chart.getModel().getComponent('grid')?.coordinateSystem?.getRect();
     if (!rect) continue;
-    let changed = false;
-    const series = o.series.map((s, i) => {
+    const items = [];
+    o.series.forEach((s, i) => {
       const coord = s.markPoint?.data?.[0]?.coord;
-      if (!coord) return {};
+      if (!coord) return;
       // Measured on the running total's own y axis (the right-hand Σ axis), not the first one.
-      const py = chart.convertToPixel({ yAxisIndex: s.yAxisIndex ?? 0 }, coord[1]);
-      if (py == null || Number.isNaN(py)) return {};
+      const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: s.yAxisIndex ?? 0 }, coord) ?? [];
+      if (py == null || Number.isNaN(py)) return;
       const roomAbove = py - 4 - LABEL_H >= rect.y;
       const roomBelow = py + 4 + LABEL_H <= rect.y + rect.height;
       const below = !roomAbove && roomBelow;
-      const want = below ? 'bottom' : 'top';
-      if (s.markPoint.label?.position === want) return {};
+      const top = below ? py + 4 : py - 4 - LABEL_H;
+      items.push({ i, s, below, top, top0: top, left: px - labelWidth(s.markPoint.label.formatter()), right: px });
+    });
+    // Highest first; each one goes clear of those already placed that it overlaps.
+    items.sort((a, b) => a.top - b.top);
+    const placed = [];
+    for (const it of items) {
+      const hits = () => placed.find((p) => it.left < p.right && it.right > p.left && it.top < p.top + LABEL_H && it.top + LABEL_H > p.top);
+      for (let h = hits(), n = 0; h && n < 10; h = hits(), n++) it.top = h.top + LABEL_H + 1;
+      if (it.top + LABEL_H > rect.y + rect.height) { // no room below: above them all instead
+        it.top = Math.min(...placed.filter((p) => it.left < p.right && it.right > p.left).map((p) => p.top), it.top0) - LABEL_H - 1;
+      }
+      placed.push(it);
+    }
+    let changed = false;
+    const series = o.series.map((s, i) => {
+      const it = items.find((x) => x.i === i);
+      if (!it) return {};
+      const offset = [0, Math.round(it.top - it.top0)];
+      const l = s.markPoint.label;
+      const want = it.below ? 'bottom' : 'top';
+      if (l?.position === want && (l.offset?.[1] ?? 0) === offset[1]) return {};
       changed = true;
-      return { markPoint: { label: below
-        ? { position: 'bottom', backgroundColor: bg, padding: [1, 3], borderRadius: 3 }
-        : { position: 'top', backgroundColor: 'transparent', padding: 0 } } };
+      return { markPoint: { label: it.below || offset[1]
+        ? { position: want, offset, backgroundColor: bg, padding: [1, 3], borderRadius: 3 }
+        : { position: want, offset, backgroundColor: 'transparent', padding: 0 } } };
     });
     if (changed) chart.setOption({ series });
   }
@@ -308,7 +355,7 @@ export function totalLabelBoxes() {
       const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: s.yAxisIndex ?? 0 }, coord) ?? [];
       if (py == null || Number.isNaN(py)) continue;
       const w = measureCtx.measureText(mp.label.formatter()).width + 6;
-      const top = mp.label.position === 'bottom' ? py + 4 : py - 4 - LABEL_H;
+      const top = (mp.label.position === 'bottom' ? py + 4 : py - 4 - LABEL_H) + (mp.label.offset?.[1] ?? 0);
       boxes.push({ left: dom.left + px - w, right: dom.left + px, top: dom.top + top, bottom: dom.top + top + LABEL_H });
     }
   }
@@ -362,7 +409,7 @@ function describe(key, s, i, gran) {
 // Series for one variable. axes = {main, cum} y-axis indices.
 // endIdx: last bar on screen; the running total shows its value there, in bold.
 // totalIdx: the bar whose running total is the value written (its end may be off screen).
-function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = [], totalIdx = endIdx) {
+function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = [], totalIdx = endIdx, stat = null) {
   const v = VAR_BY_KEY[key];
   const light = lighter(color), dark = darker(color, theme);
   const pts = (arr) => x.map((t, i) => [t, arr[i]]);
@@ -413,7 +460,8 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
         // "Total" and the number, in bold, right above the end of the line (no unit, no background).
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
         // (placeTotalLabels moves it below the point, on a background, when there is no room above)
-        label: { show: true, position: 'top', distance: 4, align: 'right', color: theme.text, fontWeight: 700, fontSize: TOTAL_FS,
+        // In the colour of its own running-total line, so that several totals can be told apart.
+        label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS,
           backgroundColor: 'transparent', padding: 0,
           formatter: () => endText },
         data: [{ coord: [endX ?? x[endIdx], endVal] }],
@@ -433,6 +481,30 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
     const line = { type: 'line', yAxisIndex: axes.main, showSymbol: x.length < 60, symbolSize: 4, ...fast, connectNulls: false, itemStyle: { color: dark } };
     out.push({ ...line, name: v.label, data: pastPts(s.val), lineStyle: { color: dark, width: 2 } });
     out.push({ ...line, name: `${v.label} forecast`, data: fcLinePts(s.val), lineStyle: { color: dark, width: 2, type: 'dotted' } });
+    // Mean over the range of the marks: a dashed level line between them, its value written at its
+    // end like the totals ("Mean 7.4 °C (2.1–12.0)": mean, then lowest and highest bar).
+    if (stat && endIdx >= 0) {
+      let sum = 0, w = 0, lo = Infinity, hi = -Infinity, withFc = false;
+      for (let i = stat.i0; i <= stat.i1; i++) {
+        const val = s.val[i];
+        if (val == null) continue;
+        const h = stat.hours?.[i] || 1;
+        sum += val * h; w += h;
+        lo = Math.min(lo, val); hi = Math.max(hi, val);
+        if (fc[i]) withFc = true;
+      }
+      if (w) {
+        const mean = sum / w, d = decimals(s.unit);
+        const text = `Mean ${mean.toFixed(d)} ${s.unit} (${lo.toFixed(d)}–${hi.toFixed(d)})${withFc ? ' incl. forecast' : ''}`;
+        const xe = endX ?? x[endIdx];
+        out.push({ type: 'line', name: `${v.label} – mean`, yAxisIndex: axes.main, showSymbol: false, silent: true, z: 3,
+          data: [[stat.xs, mean], [xe, mean]], lineStyle: { color: dark, width: 1.5, type: 'dashed' },
+          markPoint: { symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: dark },
+            label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS,
+              backgroundColor: 'transparent', padding: 0, formatter: () => text },
+            data: [{ coord: [xe, mean] }] } });
+      }
+    }
   }
   return out;
 }
@@ -578,7 +650,10 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   if (!agg.x.length) { disposeCharts(); container.innerHTML = ''; return; }
   const theme = themeColors();
   const { x, hours, series } = agg;
-  const color = (k) => colorFor(keys, k);
+  // keys: the variables drawn; opts.allKeys: all the selected ones, hidden ones included (their title
+  // stays, to show them again). Colours follow the full list, so hiding one changes no colour.
+  const allKeys = opts.allKeys || keys;
+  const color = (k) => colorFor(allKeys, k);
   const step = STEP_MS[gran];
   const range = opts.range || { min: agg.start[0], max: agg.end[agg.end.length - 1] };
   Object.assign(chartRange, range, { minSpan: 3 * 3600e3 });
@@ -587,6 +662,8 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
   // Last bar on screen (chosen by the app, same bars as the title text): the running total's value
   // is written there.
   const endIdx = opts.endIdx ?? -1, totalIdx = opts.totalIdx ?? endIdx;
+  // Bars of the range of the marks (for the means of the variables that are not added up).
+  const stat = opts.statRange ? { ...opts.statRange, xs: agg.start[opts.statRange.i0], hours } : null;
   if (!instances.length) plotWidth = Math.max(120, container.clientWidth - (mode === 'combined' ? 140 : 112)); // first guess
   tickUnit = unitFor(span);
   topShown = topFor(span);
@@ -630,7 +707,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       const main = axisIdx(`${v.kind === 'dir' ? 'dir' : unitName}`, unitName, v.kind, color(k));
       const cum = s.cum ? axisIdx(`${unitName}-cum`, `Σ ${unitName}`, 'sum', theme.muted) : 0;
-      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc, totalIdx));
+      all.push(...seriesFor(k, s, x, gran, color(k), { main, cum }, theme, endIdx, opts.endX, agg.fc, totalIdx, stat));
       // Variables sharing a unit share an axis: its fixed range must hold all of them.
       const sc = opts.yScale?.[k];
       if (sc && v.kind !== 'dir') {
@@ -664,13 +741,13 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       }
       const opt = baseOption(gran, theme, makeTooltip([k]), right.side, left.side, zoom);
       opt.yAxis = yAxes;
-      opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx), nowSeries(opts.nowMs, theme)];
+      opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx, stat), nowSeries(opts.nowMs, theme)];
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });
   }
 
   // Same layout as now: update in place, so the screen does not flash.
-  const sig = [mode, gran, keys.join(','), narrow, theme.text].join('|');
+  const sig = [mode, gran, keys.join(','), allKeys.join(','), narrow, theme.text].join('|');
   // After drawing: measure the real plot width and re-space the labels if the estimate was off.
   const fitLabels = () => {
     measurePlot();
@@ -697,9 +774,21 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       opts.onZoom?.({ startMs, endMs });
     });
   };
-  if (mode === 'combined') keys.forEach((k) => { titleEls[k] = titleEl(k, color(k)); container.append(titleEls[k]); });
+  const tools = allKeys.length > 1;
+  const addTitle = (k) => {
+    titleEls[k] = titleEl(k, color(k), { tools, hidden: !keys.includes(k), lastShown: keys.length === 1 && keys[0] === k });
+    container.append(titleEls[k]);
+  };
+  // Combined: every title above the one chart. Separate: each title above its chart, a hidden
+  // variable keeping only its title, in the order of the list.
+  if (mode === 'combined') allKeys.forEach(addTitle);
+  let next = 0;
   charts.forEach((c, n) => {
-    if (mode !== 'combined') { const k = keys[n]; titleEls[k] = titleEl(k, color(k)); container.append(titleEls[k]); }
+    if (mode !== 'combined') {
+      const k = keys[n];
+      while (next < allKeys.length && allKeys[next] !== k) addTitle(allKeys[next++]);
+      addTitle(allKeys[next++]);
+    }
     const el = document.createElement('div');
     el.className = c.cls;
     container.append(el);
@@ -710,6 +799,7 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
     if (mode !== 'combined') chart.group = GROUP;
     instances.push(chart);
   });
+  if (mode !== 'combined') while (next < allKeys.length) addTitle(allKeys[next++]); // hidden ones at the end
   if (mode !== 'combined') echarts.connect(GROUP);
   current = { sig, titleEls, gran, theme };
   fitLabels();
