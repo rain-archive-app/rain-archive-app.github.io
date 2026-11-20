@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=148';
-import { fmtWall, STEP_MS } from './data.js?v=148';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=149';
+import { fmtWall, STEP_MS } from './data.js?v=149';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -137,6 +137,7 @@ const gridAxis = (range, values, color) => ({
   splitLine: { show: true, lineStyle: { color, width: 1 } },
 });
 
+const WEEKDAY_W = 22; // px, how far right of its tick a slanted weekday label reaches
 function xAxes(theme, gran) {
   const range = { min: chartRange.min, max: chartRange.max };
   const ticks = calendarTicks(view.s, view.e, tickUnit); // imposed, so they stay perfectly regular
@@ -146,7 +147,10 @@ function xAxes(theme, gran) {
   if (minor.length && plotWidth / minor.length < 4) minor = ticks;
   // Weekdays on top exactly above the bottom labels that name a day (midnight ticks), so a day
   // hidden below for lack of room is hidden above too, and every connector has its label.
-  const weekdays = ticks.filter((t) => t % DAY === 0);
+  // A weekday too close to the right end of the plot would run, slanting up to the right, under the
+  // unit written above the right axis: it is left out (with its connector).
+  const px = (t) => ((t - view.s) / (view.e - view.s)) * plotWidth;
+  const weekdays = ticks.filter((t) => t % DAY === 0 && px(t) <= plotWidth - WEEKDAY_W);
   return [
     {
       // Labels below the plot (no tick marks below the axis).
@@ -637,6 +641,9 @@ function axisRoom(arrs, sc, kind, fs, name = '') {
   }
   // The widest number, measured in the font ECharts draws it with (digits all have the same width),
   // then 5 px to the axis line: the side holds just that, plus 2 px to the edge of the chart.
+  // Always room for at least 3 digits, so that the plot does not move sideways when the numbers
+  // change from 1 or 2 digits to 3 as the view moves (more only for values that need them, like 1013 hPa).
+  chars = Math.max(chars, 3);
   measureCtx ??= document.createElement('canvas').getContext('2d');
   measureCtx.font = `${fs}px ${bodyFont()}`;
   const gap = Math.ceil(measureCtx.measureText('8'.repeat(chars)).width) + 5;
