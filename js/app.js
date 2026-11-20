@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=137';
+} from './vars.js?v=142';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=137';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=137';
-import { createRangeBar } from './rangebar.js?v=137';
-import { initAccount, pushFavorites } from './account.js?v=137';
+} from './data.js?v=142';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=142';
+import { createRangeBar } from './rangebar.js?v=142';
+import { initAccount, pushFavorites } from './account.js?v=142';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1345,6 +1345,7 @@ function showGuide(which, hit) {
   const r = hit.chartEl.getBoundingClientRect();
   const px = hit.chart.convertToPixel({ xAxisIndex: 0 }, hit.snapped);
   guide.style.left = `${r.left - wrap.left + px}px`;
+  guide.style.top = `${markView()?.top ?? 0}px`; // in the chart zone, like the marks
   guide.classList.toggle('end', which === 'end');
   guide.firstChild.textContent = markLabel(hit.snapped);
   guide.hidden = false;
@@ -1381,16 +1382,22 @@ function markView() {
   const grid = chartEl && echarts.getInstanceByDom(chartEl)?.getModel()?.getComponent('grid')?.coordinateSystem?.getRect();
   if (!grid) return null;
   const wrap = $('mark-link').parentElement.getBoundingClientRect();
+  // The marks stay in the chart zone: their date boxes end just over the top of the first chart's own
+  // date labels (the slanted weekdays, about 29 px above the plot, or else the units, 20 px above).
+  const weekdays = echarts.getInstanceByDom(chartEl).getModel().getComponent('xAxis', 1)?.get('show');
+  const labelsTop = grid.y - (weekdays ? 29 : 20);
+  const MARK_BOX_H = 18;
   return {
     s: zoomWin ? zoomWin.startMs : chartRange.min, e: zoomWin ? zoomWin.endMs : chartRange.max,
     left: chartEl.getBoundingClientRect().left - wrap.left + grid.x, width: grid.width, wrap,
+    top: Math.round(chartEl.getBoundingClientRect().top - wrap.top + labelsTop - MARK_BOX_H + 2),
   };
 }
 
 // The handles sit halfway down the part of the charts that is on screen, unless a "Total …" label
 // is there: then they move just above or below it, whichever is nearer.
 function handlesY(v, xOf) {
-  const top = Math.max(v.wrap.top, 0) - v.wrap.top, bottom = Math.min(v.wrap.bottom, innerHeight) - v.wrap.top;
+  const top = Math.max(v.wrap.top + v.top, 0) - v.wrap.top, bottom = Math.min(v.wrap.bottom, innerHeight) - v.wrap.top;
   const xs = ['start', 'end'].map((w) => pendingMarks[w]).filter((t) => t != null && t >= v.s && t <= v.e).map(xOf);
   if (!xs.length) return (top + bottom) / 2;
   const left = Math.min(...xs) - 16, right = Math.max(...xs) + 16;
@@ -1417,8 +1424,9 @@ function placePendingLine() {
     line.hidden = !v || t == null || t < v.s || t > v.e;
     if (line.hidden) continue;
     line.style.left = `${xOf(t)}px`;
+    line.style.top = `${v.top}px`;
     line.firstChild.textContent = markLabel(t);
-    line.querySelector('.mark-handle').style.top = `${y}px`;
+    line.querySelector('.mark-handle').style.top = `${y - v.top}px`; // inside the line, which starts at v.top
   }
   const { start, end } = pendingMarks;
   const both = v && start != null && end != null;
@@ -1810,7 +1818,9 @@ function renderResults() {
   // (Only the data behind them is loaded whole, so their values are complete.)
   const range = axis ? { min: wallMs(axis.S, raw.tz), max: wallMs(axis.E, raw.tz) } : undefined;
   // Hidden variables count too: hiding some must not switch the layout (the titles would move).
-  renderCharts($('charts'), agg, keys, state.agg, allKeys.length < 2 ? 'stacked' : state.chartMode,
+  const layout = allKeys.length < 2 ? 'stacked' : state.chartMode;
+  $('charts').classList.toggle('combined-mode', layout === 'combined'); // its titles go up beside the tools
+  renderCharts($('charts'), agg, keys, state.agg, layout,
     { allKeys, statRange: dates && endIdx >= 0 ? { i0: dates.i0, i1: dates.i1 } : null, range, zoom: zoomWin, onZoom: onChartZoom, yScale: yScales(keys, agg), endIdx, totalIdx, nowMs: wallMs(nowHour(), raw.tz),
       // Where the value is written: the end of the last bar (where the end mark sits), kept on screen.
       endX: endIdx >= 0 && zoomWin ? Math.min(Math.max(agg.end[endIdx], zoomWin.startMs), zoomWin.endMs) : undefined });

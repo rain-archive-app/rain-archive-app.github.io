@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=137">
+  <link rel="stylesheet" href="css/app.css?v=142">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=137"></script>
+  <script type="module" src="js/app.js?v=142"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -175,7 +175,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5v14M21 5v14"/><path d="M7 12h10"/><path d="M9.5 9.5 7 12l2.5 2.5M14.5 9.5 17 12l-2.5 2.5"/></svg>
           </button>
         </div>
-        <div class="tool-icons">
+      </div>
+      <div id="status" class="status" role="status"></div>
+      <div class="charts-wrap">
+        <div class="chart-tools">
           <!-- Time step: finer ‹ current › coarser (hour → day → month → year) -->
           <div class="stepper" role="group" aria-label="Time step">
             <button type="button" id="btn-finer" class="btn icon" title="Finer time step" aria-label="Finer time step">
@@ -186,17 +189,12 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
             </button>
           </div>
-        </div>
-      </div>
-      <div id="status" class="status" role="status"></div>
-      <div class="charts-wrap">
-        <div class="chart-tools">
+          <button type="button" id="btn-chart-mode" class="btn icon" aria-pressed="false" title="Combine charts" aria-label="Combine charts" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 5-8 4 5"/><path d="M3 20h18"/><path d="M3 13l5 2 4-3 5 3 4-2" opacity=".55"/></svg>
+          </button>
           <!-- Download the charts as an image: PNG, JPG or SVG, from a small menu -->
           <button type="button" id="btn-export" class="btn icon" title="Download the charts as an image" aria-label="Download the charts as an image" aria-haspopup="menu" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 17v3h16v-3"/></svg>
-          </button>
-          <button type="button" id="btn-chart-mode" class="btn icon" aria-pressed="false" title="Combine charts" aria-label="Combine charts" hidden>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 5-8 4 5"/><path d="M3 20h18"/><path d="M3 13l5 2 4-3 5 3 4-2" opacity=".55"/></svg>
           </button>
           <button type="button" id="btn-fullscreen" class="btn icon" title="Full screen" aria-label="Full screen" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>

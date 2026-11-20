@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=137';
-import { fmtWall, STEP_MS } from './data.js?v=137';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=142';
+import { fmtWall, STEP_MS } from './data.js?v=142';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -35,8 +35,7 @@ export function chartModeIcon(keys, toCombined) {
   const col = (i) => (keys[i] ? colorFor(keys, keys[i]) : 'currentColor');
   const line = (d, i) => `<path d="${d}" stroke="${col(i)}" stroke-width="2"/>`;
   if (toCombined) {
-    return '<path d="M3 20.5h18" stroke-width="1.2" opacity=".5"/>'
-      + line('M3 15l5-7 5 5 8-8', 0) + line('M3 9l5 7 5-4 8 5', 1);
+    return line('M3 16l5-7 5 5 8-8', 0) + line('M3 10l5 7 5-4 8 5', 1);
   }
   return '<path d="M3 12h18" stroke-width="1" opacity=".45"/>'
     + line('M3 9l5-4 5 2.5 8-4', 0) + line('M3 19.5l5-4 5 2.5 8-4', 1);
@@ -100,7 +99,7 @@ export function boundStep(spanMs) {
 }
 // Weekdays on top whenever the bottom labels name days ("19 Oct"), whatever the aggregation level.
 const topFor = (spanMs) => ['h', 'd', 'w'].includes(unitFor(spanMs)[1]);
-const GRID_TOP = { on: 50, off: 27 }; // room for the diagonal weekdays, or else for the units above the axes
+const GRID_TOP = { on: 34, off: 22 }; // room for the diagonal weekdays, or else for the units above the axes
 
 function bottomLabel(ms) {
   const d = new Date(ms);

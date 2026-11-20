@@ -265,7 +265,7 @@ body.two-fingers .chart > div + div { display: none !important; }
   background: var(--accent); color: var(--accent-text); font-size: 11px;
 }
 .mark-guide.end span { left: auto; right: 4px; }
-.mark-guide.low span { top: 22px; } /* two marks close together: their labels don't overlap */
+.mark-guide.low span { top: -19px; } /* two marks close together: the end's label goes just above the start's */
 /* Round handles on the waiting marks' lines, to drag them sideways, and on the line joining them. */
 .mark-handle {
   position: absolute; left: -1px; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%);
@@ -296,12 +296,20 @@ body.two-fingers .chart > div + div { display: none !important; }
 .mark-menu button:hover { background: var(--chart-grid); }
 /* First mark dropped: what it is, and the second mark to drop next. */
 
-/* Combine / full-screen / refresh icons sit at the top right of the charts. */
+/* Two zones, one above the other: at the top the tools (step, combine, download, full screen, refresh)
+   with, beside them, the titles when the charts are combined; below, the charts and the marks.
+   Separate charts keep each title above its chart, in the chart zone. */
 .charts-wrap { position: relative; }
 #btn-chart-mode svg { width: 20px; height: 20px; } /* coloured lines: no pressed tint */
 #btn-chart-mode[aria-pressed="true"] { background: var(--bg); border-color: var(--line); }
-.chart-tools { position: absolute; top: 8px; right: 0; display: flex; gap: 3px; z-index: 2; }
-#charts > .chart-title:first-child { padding-right: 130px; }
+.chart-tools { float: right; display: flex; align-items: center; gap: 3px; margin: 0 0 0 8px; position: relative; z-index: 2; }
+.chart-tools .btn.icon { width: 30px; min-height: 28px; height: 28px; }
+.chart-tools .stepper .btn.icon { min-height: 26px; height: 26px; }
+/* The first title (all of them when combined) beside the tools; the charts below them. */
+#charts .chart { clear: both; }
+#charts > .chart-title:first-child { margin-top: 4px; }
+#charts.combined-mode > .chart-title { margin-top: 4px; }
+#charts.combined-mode > .chart-title:first-child { margin-top: 4px; }
 
 /* Long-press menu of a favorite */
 .menu {
@@ -397,4 +405,4 @@ dialog.var-info .dialog-head { padding: 0 0 8px; }
 .leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 18px; }
 /* Mapbox wordmark (from mapbox-gl.css), required by Mapbox's terms. */
 .mapbox-logo { display: block; width: 88px; height: 23px; background-repeat: no-repeat;
-  background-image: url("../icons/mapbox-logo.svg?v=137"); }
+  background-image: url("../icons/mapbox-logo.svg?v=142"); }
