@@ -14,6 +14,7 @@ const CONFIG = {
   appId: '1:436128984591:web:4a75f296a1a9f28587fd7a',
 };
 const FLAG = 'rain-archive-account'; // "1" once signed in on this device
+const LINK_EMAIL = 'rain-archive-link-email'; // address a sign-in link was sent to
 
 let fb = null;       // Promise of { au, fs, auth, db }
 let user = null;
@@ -110,6 +111,68 @@ async function signIn() {
   render();
 }
 
+// E-mail and password accounts (Firebase checks the password; it is never stored by the app).
+let emailOpen = false, email = '', pw = '';
+const AUTH_MSG = {
+  'auth/invalid-credential': 'Wrong e-mail or password',
+  'auth/wrong-password': 'Wrong e-mail or password',
+  'auth/user-not-found': 'Wrong e-mail or password',
+  'auth/invalid-email': 'This e-mail address is not valid',
+  'auth/missing-password': 'Enter a password',
+  'auth/weak-password': 'The password needs at least 6 characters',
+  'auth/email-already-in-use': 'An account already exists for this e-mail: sign in instead',
+  'auth/too-many-requests': 'Too many attempts: try again in a few minutes',
+  'auth/network-request-failed': 'No connection',
+};
+
+async function emailAction(kind) {
+  if (busy) return;
+  if (!email) { opts.toast('Enter your e-mail address'); return; }
+  busy = true;
+  render();
+  try {
+    await listen();
+    const { au, auth } = await sdk();
+    if (kind === 'link') {
+      // Passwordless: Firebase e-mails a link back to this page; opening it signs in (see finishLink).
+      await au.sendSignInLinkToEmail(auth, email, { url: location.origin + location.pathname, handleCodeInApp: true });
+      try { localStorage.setItem(LINK_EMAIL, email); } catch { /* ignore */ }
+      opts.toast(`Sign-in link sent to ${email}: open it on this device`);
+    } else if (kind === 'reset') {
+      await au.sendPasswordResetEmail(auth, email);
+      opts.toast('If an account exists for this address, an e-mail to reset the password has been sent');
+    } else {
+      await (kind === 'create' ? au.createUserWithEmailAndPassword : au.signInWithEmailAndPassword)(auth, email, pw);
+      emailOpen = false; pw = '';
+    }
+  } catch (e) {
+    opts.toast(AUTH_MSG[e.code] || `Failed (${e.code || e.message})`);
+  }
+  busy = false;
+  render();
+}
+
+function emailForm() {
+  const form = document.createElement('form');
+  form.className = 'account-form';
+  const field = (type, value, placeholder, auto, set) => {
+    const i = document.createElement('input');
+    Object.assign(i, { type, value, placeholder, autocomplete: auto, required: false });
+    i.oninput = () => set(i.value.trim());
+    return i;
+  };
+  const em = field('email', email, 'E-mail', 'username', (v) => { email = v; });
+  const pass = field('password', pw, 'Password', 'current-password', (v) => { pw = v; });
+  const signInBtn = btn(busy ? '…' : 'Sign in', 'btn small primary', null);
+  signInBtn.type = 'submit';
+  form.onsubmit = (e) => { e.preventDefault(); emailAction('signin'); };
+  form.append(em, pass, signInBtn,
+    btn('Create account', 'btn small', () => emailAction('create')),
+    btn('E-mail me a link', 'btn small', () => emailAction('link'), 'No password: get a sign-in link by e-mail'),
+    btn('Forgot password?', 'btn mini link', () => emailAction('reset')));
+  return form;
+}
+
 async function signOut() {
   const { au, auth } = await sdk();
   stopSync();
@@ -127,6 +190,10 @@ async function deleteAccount() {
       await au.deleteUser(auth.currentUser);
     } catch (e) {
       if (e.code !== 'auth/requires-recent-login') throw e;
+      if (!auth.currentUser.providerData.some((p) => p.providerId === 'google.com')) {
+        opts.toast('For safety, sign out, sign in again, then delete the account');
+        return;
+      }
       // Google asks to confirm the identity once more before deleting an account.
       await au.reauthenticateWithPopup(auth.currentUser, new au.GoogleAuthProvider());
       await au.deleteUser(auth.currentUser);
@@ -164,9 +231,11 @@ function render() {
     const txt = document.createElement('span');
     txt.className = 'small muted';
     txt.textContent = 'Keep your favorites on all your devices:';
-    line.append(txt, btn(busy ? 'Signing in…' : 'Sign in with Google', 'btn small', signIn));
+    line.append(txt, btn(busy && !emailOpen ? 'Signing in…' : 'Sign in with Google', 'btn small', signIn),
+      btn(emailOpen ? 'Hide e-mail' : 'With e-mail', 'btn small', () => { emailOpen = !emailOpen; render(); }));
   }
   box.append(line);
+  if (!user && emailOpen) box.append(emailForm());
   const note = document.createElement('div');
   note.className = 'small muted account-note';
   note.textContent = 'With an account, your e-mail address and favorites are stored by Google Firebase, '
@@ -179,5 +248,28 @@ export function initAccount(o) {
   render();
   let known = false;
   try { known = localStorage.getItem(FLAG) === '1'; } catch { /* ignore */ }
-  if (known) listen().catch(() => { /* offline: favorites of this device are used */ });
+  if (/[?&]mode=signIn\b/.test(location.search)) finishLink();
+  else if (known) listen().catch(() => { /* offline: favorites of this device are used */ });
+}
+
+// The page was opened from a sign-in link e-mailed by Firebase.
+async function finishLink() {
+  try {
+    await listen();
+    const { au, auth } = await sdk();
+    if (!au.isSignInWithEmailLink(auth, location.href)) return;
+    let addr = null;
+    try { addr = localStorage.getItem(LINK_EMAIL); } catch { /* ignore */ }
+    // Link opened on another device or browser: Firebase needs the address again.
+    addr ||= prompt('Confirm your e-mail address to sign in');
+    if (!addr) return;
+    await au.signInWithEmailLink(auth, addr.trim(), location.href);
+    try { localStorage.removeItem(LINK_EMAIL); } catch { /* ignore */ }
+    opts.toast('Signed in');
+  } catch (e) {
+    opts.toast(e.code === 'auth/invalid-action-code' || e.code === 'auth/expired-action-code'
+      ? 'This sign-in link has expired or was already used' : (AUTH_MSG[e.code] || `Sign-in failed (${e.code || e.message})`));
+  } finally {
+    history.replaceState(null, '', location.pathname); // remove the link's code from the address
+  }
 }
