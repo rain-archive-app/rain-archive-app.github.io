@@ -92,7 +92,8 @@ export const VARS = RAW.map(([key, label, cat, kind, fu]) => ({
   fixedUnit: FAMILIES[fu] ? null : fu,
 }));
 export const VAR_BY_KEY = Object.fromEntries(VARS.map((v) => [v.key, v]));
-export const QUICK_VARS = ['rain'];
+// Always at the top of the Data tab, before "Other variables".
+export const QUICK_VARS = ['rain', 'precipitation', 'snowfall', 'snow_depth', 'temperature_2m'];
 
 export function baseUnit(v) { return v.family ? FAMILIES[v.family].base : v.fixedUnit; }
 export function displayUnit(v, units) { return v.family ? (units[v.family] || FAMILIES[v.family].def) : v.fixedUnit; }

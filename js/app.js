@@ -1,14 +1,14 @@
 ﻿import {
   VARS, VAR_BY_KEY, QUICK_VARS, FAMILIES, MODELS, IFS_FROM, pre2017Source, defaultUnits, displayUnit, decimals, wmoLabel, compass,
-} from './vars.js?v=126';
+} from './vars.js?v=137';
 import {
   HOUR, STEP_MS, STEPS, FORECAST_DAYS, bucketBounds, searchPlaces, parseCoords, resolvePoint, getElevation, fetchHourly, fetchEnsemble, addEnsembleBands, aggregate,
   zonedToUnix, unixToZonedInput, floorLocalHour, wallMs, tzOffset, fmtWall, fmtDuration,
   DURATION_UNITS, subtractDuration, bestDuration,
-} from './data.js?v=126';
-import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts } from './charts.js?v=126';
-import { createRangeBar } from './rangebar.js?v=126';
-import { initAccount, pushFavorites } from './account.js?v=126';
+} from './data.js?v=137';
+import { renderCharts, renderEmpty, disposeCharts, resizeCharts, setZoom, chartRange, boundStep, totalLabelBoxes, exportCharts, chartModeIcon } from './charts.js?v=137';
+import { createRangeBar } from './rangebar.js?v=137';
+import { initAccount, pushFavorites } from './account.js?v=137';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1781,6 +1781,12 @@ function renderResults() {
   modeBtn.setAttribute('aria-pressed', combined);
   modeBtn.title = combined ? 'Separate charts' : 'Combine charts';
   modeBtn.setAttribute('aria-label', modeBtn.title);
+  // The icon shows the other layout, the one a click gives, in the variables' colours.
+  const iconSig = `${combined}|${allKeys.slice(0, 2).join(',')}`;
+  if (modeBtn.dataset.icon !== iconSig) {
+    modeBtn.dataset.icon = iconSig;
+    modeBtn.querySelector('svg').innerHTML = chartModeIcon(allKeys, !combined);
+  }
 
   const agg = aggregate(raw, allKeys, state.agg, state.units);
   lastX = agg.x; lastStart = agg.start; lastEnd = agg.end;

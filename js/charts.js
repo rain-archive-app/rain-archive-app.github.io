@@ -1,7 +1,7 @@
 ﻿// ECharts rendering: one synced chart per variable ("stacked") or a single multi-axis chart ("combined").
 // When only the data or the time range changes, existing charts are updated in place (no flicker).
-import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=126';
-import { fmtWall, STEP_MS } from './data.js?v=126';
+import { VAR_BY_KEY, decimals, wmoLabel, compass } from './vars.js?v=137';
+import { fmtWall, STEP_MS } from './data.js?v=137';
 
 const PALETTE = ['#2f7fd8', '#e8743b', '#19a979', '#945ecf', '#d4526e', '#13a4b4', '#ce8f1f', '#6b7a8f'];
 const GROUP = 'rain-archive';
@@ -28,6 +28,19 @@ const PINCH_TOLERANCE = 0.15; // finger spacing may change ±15 % during a two-f
 
 // Full x range of the charts (wall ms) and smallest visible span; shared with the gesture code and the app.
 export const chartRange = { min: 0, max: 1, minSpan: 3 * 3600e3 };
+
+// Icon of the combine / separate button: two data lines in the colours of the first two variables. It shows what a click will give:
+// the lines together in one chart, or each in its own band.
+export function chartModeIcon(keys, toCombined) {
+  const col = (i) => (keys[i] ? colorFor(keys, keys[i]) : 'currentColor');
+  const line = (d, i) => `<path d="${d}" stroke="${col(i)}" stroke-width="2"/>`;
+  if (toCombined) {
+    return '<path d="M3 20.5h18" stroke-width="1.2" opacity=".5"/>'
+      + line('M3 15l5-7 5 5 8-8', 0) + line('M3 9l5 7 5-4 8 5', 1);
+  }
+  return '<path d="M3 12h18" stroke-width="1" opacity=".45"/>'
+    + line('M3 9l5-4 5 2.5 8-4', 0) + line('M3 19.5l5-4 5 2.5 8-4', 1);
+}
 
 // ---------- Axis labels ----------
 // Bottom ticks are evenly spaced in a calendar unit chosen from the visible span and the chart width
@@ -87,7 +100,7 @@ export function boundStep(spanMs) {
 }
 // Weekdays on top whenever the bottom labels name days ("19 Oct"), whatever the aggregation level.
 const topFor = (spanMs) => ['h', 'd', 'w'].includes(unitFor(spanMs)[1]);
-const GRID_TOP = { on: 50, off: 14 }; // room for the diagonal weekdays
+const GRID_TOP = { on: 50, off: 27 }; // room for the diagonal weekdays, or else for the units above the axes
 
 function bottomLabel(ms) {
   const d = new Date(ms);
@@ -180,7 +193,12 @@ function applyLabels(gran, theme) {
   if (sig === labelSig) return;
   labelSig = sig;
   const grid = { top: topShown ? GRID_TOP.on : GRID_TOP.off };
-  for (const c of instances) c.setOption({ xAxis, grid });
+  // The units above the y axes follow the top of the plot (separate charts only have them).
+  const unitTop = { top: grid.top - UNIT_GAP - 11 };
+  for (const c of instances) {
+    const units = c.getModel().getComponent('graphic') ? { graphic: [{ id: 'unit-l', ...unitTop }, { id: 'unit-r', ...unitTop }] } : {};
+    c.setOption({ xAxis, grid, ...units });
+  }
 }
 
 // ---------- Touch gestures ----------
@@ -285,7 +303,7 @@ function hideTips(off) {
 const EYE = '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_OFF = `${EYE}<path d="M4 4l16 16"/>`;
 const BIN = '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/>';
-const INFO = '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r=".6" fill="currentColor"/>';
+const INFO = '<circle cx="12" cy="12" r="9.5"/><path d="M12 11.2v5.6"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/>';
 function titleEl(key, color, t = {}) {
   const el = document.createElement('div');
   el.className = 'chart-title' + (t.hidden ? ' is-hidden' : '');
@@ -353,6 +371,7 @@ function labelWidth(text) {
   return measureCtx.measureText(text).width + 6;
 }
 let labelFont = null;
+const bodyFont = () => getComputedStyle(document.body).fontFamily;
 // The "Total" / "Mean" labels of each chart, noted when the charts are drawn ({ i: series index,
 // coord, yAxisIndex, w: width, pos, off }), so that nothing has to read the charts' whole options
 // back (chart.getOption() copies all the data: far too slow to do while dragging).
@@ -361,7 +380,7 @@ function noteLabels(charts) {
   labelSpecs = charts.map((c) => ({ count: c.opt.series.length, items: c.opt.series.map((s, i) => {
     const coord = s.markPoint?.data?.[0]?.coord;
     if (!coord) return null;
-    return { i, coord, yAxisIndex: s.yAxisIndex ?? 0, w: labelWidth(s.markPoint.label.formatter()), pos: 'top', off: 0 };
+    return { i, coord, yAxisIndex: s.yAxisIndex ?? 0, w: labelWidth(s.markPoint.label.formatter()), pos: 'top', off: 0, offX: 0 };
   }).filter(Boolean) }));
 }
 function placeTotalLabels() {
@@ -380,7 +399,9 @@ function placeTotalLabels() {
       const roomBelow = py + 4 + LABEL_H <= rect.y + rect.height;
       const below = !roomAbove && roomBelow;
       const top = below ? py + 4 : py - 4 - LABEL_H;
-      items.push({ i: sp.i, sp, below, top, top0: top, left: px - sp.w, right: px });
+      // Right-aligned on its point, but never cut by the left edge of the chart: then moved right.
+      const dx = Math.max(0, Math.ceil(2 - (px - sp.w)));
+      items.push({ i: sp.i, sp, below, top, top0: top, dx, left: px - sp.w + dx, right: px + dx });
     });
     // Highest first; each one goes clear of those already placed that it overlaps.
     items.sort((a, b) => a.top - b.top);
@@ -397,10 +418,10 @@ function placeTotalLabels() {
     const series = Array.from({ length: spec.count }, (_, i) => {
       const it = items.find((x) => x.i === i);
       if (!it) return {};
-      const offset = [0, Math.round(it.top - it.top0)];
+      const offset = [it.dx, Math.round(it.top - it.top0)];
       const want = it.below ? 'bottom' : 'top';
-      if (it.sp.pos === want && it.sp.off === offset[1] && !it.sp.fresh) return {};
-      it.sp.pos = want; it.sp.off = offset[1]; it.sp.fresh = false;
+      if (it.sp.pos === want && it.sp.off === offset[1] && it.sp.offX === offset[0]) return {};
+      it.sp.pos = want; it.sp.off = offset[1]; it.sp.offX = offset[0];
       changed = true;
       return { markPoint: { label: it.below || offset[1]
         ? { position: want, offset, backgroundColor: bg, padding: [1, 3], borderRadius: 3 }
@@ -422,7 +443,7 @@ export function totalLabelBoxes() {
       const [px, py] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: sp.yAxisIndex }, sp.coord) ?? [];
       if (py == null || Number.isNaN(py)) continue;
       const top = (sp.pos === 'bottom' ? py + 4 : py - 4 - LABEL_H) + sp.off;
-      boxes.push({ left: dom.left + px - sp.w, right: dom.left + px, top: dom.top + top, bottom: dom.top + top + LABEL_H });
+      boxes.push({ left: dom.left + px - sp.w + sp.offX, right: dom.left + px + sp.offX, top: dom.top + top, bottom: dom.top + top + LABEL_H });
     }
   });
   return boxes;
@@ -527,8 +548,8 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
         // Right-aligned on the point, so it never runs into the axis numbers on the right.
         // (placeTotalLabels moves it below the point, on a background, when there is no room above)
         // In the colour of its own running-total line, so that several totals can be told apart.
-        label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS,
-          backgroundColor: 'transparent', padding: 0,
+        label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS, fontFamily: bodyFont(), // the font measured by labelWidth
+          backgroundColor: 'transparent', padding: 0, offset: [0, 0], // reset on each redraw: placeTotalLabels may have moved it
           formatter: () => endText },
         data: [{ coord: [endX ?? x[endIdx], endVal] }],
       } });
@@ -566,8 +587,8 @@ function seriesFor(key, s, x, gran, color, axes, theme, endIdx = -1, endX, fc = 
         out.push({ type: 'line', name: `${v.label} – mean`, yAxisIndex: axes.main, showSymbol: false, silent: true, z: 3,
           data: [[stat.xs, mean], [xe, mean]], lineStyle: { color: dark, width: 1.5, type: 'dashed' },
           markPoint: { symbol: 'circle', symbolSize: 6, silent: true, animation: false, itemStyle: { color: dark },
-            label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS,
-              backgroundColor: 'transparent', padding: 0, formatter: () => text },
+            label: { show: true, position: 'top', distance: 4, align: 'right', color: dark, fontWeight: 700, fontSize: TOTAL_FS, fontFamily: bodyFont(), // the font measured by labelWidth
+              backgroundColor: 'transparent', padding: 0, offset: [0, 0], formatter: () => text },
             data: [{ coord: [xe, mean] }] } });
       }
     }
@@ -590,8 +611,12 @@ function nowSeries(nowMs, theme) {
 // Unit names run vertically along their axis, so the space above the plot stays free for weekdays.
 function yAxis(name, unitKind, theme, position, offset, showGrid, gap) {
   const ax = {
-    type: 'value', name, position, offset, nameLocation: 'middle', nameRotate: 90, nameGap: gap,
-    nameTextStyle: { color: theme.muted, fontSize: 11 },
+    // The unit, written level above the top of the axis, on the side of its numbers: ending at the axis
+    // on the left, starting from it on the right.
+    // Lined up with the numbers below it: same 5 px from the axis line.
+    type: 'value', name, position, offset, nameLocation: 'end', nameGap: 9,
+    nameTextStyle: { color: theme.muted, fontSize: 11, fontFamily: bodyFont(), align: position === 'left' ? 'right' : 'left', verticalAlign: 'bottom',
+      padding: position === 'left' ? [0, 5, 0, 0] : [0, 0, 0, 5] },
     axisLabel: { color: theme.muted, fontSize: 11 }, splitLine: { show: showGrid, lineStyle: { color: theme.grid } }, scale: unitKind !== 'sum',
   };
   if (unitKind === 'sum') ax.min = 0;
@@ -601,7 +626,7 @@ function yAxis(name, unitKind, theme, position, offset, showGrid, gap) {
 
 // Room for an axis's numbers, estimated from the values it may show (wider than needed rather than
 // narrower: the y axis may rescale to the visible part only), then its unit name, then the edge.
-function axisRoom(arrs, sc, kind, fs) {
+function axisRoom(arrs, sc, kind, fs, name = '') {
   let lo = Infinity, hi = -Infinity;
   for (const a of arrs) for (const v of a ?? []) if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; }
   if (sc) { lo = Math.min(lo, sc.min); hi = Math.max(hi, sc.max); }
@@ -611,8 +636,21 @@ function axisRoom(arrs, sc, kind, fs) {
     chars = String(Math.round(Math.max(Math.abs(lo), Math.abs(hi)) * 1.2)).length + (lo < 0 ? 1 : 0);
     if (hi - lo < 3) chars = Math.max(chars + 2, 3); // ticks like 0.5
   }
-  const gap = Math.ceil(chars * fs * 0.62) + 5 + 8; // numbers, their margin, half the rotated name
-  return { gap, side: gap + 8 };
+  // The widest number, measured in the font ECharts draws it with (digits all have the same width),
+  // then 5 px to the axis line: the side holds just that, plus 2 px to the edge of the chart.
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  measureCtx.font = `${fs}px ${bodyFont()}`;
+  const gap = Math.ceil(measureCtx.measureText('8'.repeat(chars)).width) + 5;
+  return { gap, side: gap + 2 };
+}
+
+// Separate charts: the units above the y axes, set against the edges of the chart (left one from
+// the left edge, right one up to the right edge), 9 px above the top of the plot.
+const UNIT_GAP = 9;
+function unitTexts(left, right, theme, top) {
+  const t = (id, text, side) => ({ type: 'text', id, [side]: 2, top: top - UNIT_GAP - 11, silent: true,
+    style: { text, fill: theme.muted, font: `11px ${bodyFont()}` } });
+  return [t('unit-l', left, 'left'), t('unit-r', right || '', 'right')];
 }
 
 // Fixed y range (from the app's reference percentiles), or back to automatic when there is none.
@@ -677,10 +715,47 @@ export async function exportCharts(container, format, o) {
   }
   if (!blocks.length) return;
   const W = Math.max(...blocks.map((b) => b.w));
-  const HEAD = 30, TITLE = 22, FOOT = 22, PAD = 10;
-  let y = HEAD;
-  for (const b of blocks) { b.ty = y; b.y = y + (b.titles.length ? TITLE : 4); y = b.y + b.h; }
-  const H = y + FOOT;
+  const PAD = 10, ROW = 20, FOOT = 22;
+  // Everything is laid out once, measured, so that no text runs out of the image: the heading
+  // shrinks (down to 10 px) or goes on two lines, the titles wrap onto several rows, and so does
+  // the credit if it must.
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  const textW = (s, f) => { measureCtx.font = f; return measureCtx.measureText(s).width; };
+  const fit = (s, weight, size, min) => {
+    let px = size;
+    while (px > min && textW(s, `${weight} ${px}px ${font}`) > W - 2 * PAD) px -= 0.5;
+    return px;
+  };
+  const texts = []; // { s, x, y, px, weight, color, anchor }
+  let y = 0;
+  const headFull = fit(o.heading, 700, 14, 13);
+  if (textW(o.heading, `700 ${headFull}px ${font}`) <= W - 2 * PAD) {
+    y += 20; texts.push({ s: o.heading, x: PAD, y, px: headFull, weight: 700, color: theme.text });
+  } else {
+    const cut = o.heading.indexOf(' · ');
+    const lines = cut > 0 ? [o.heading.slice(0, cut), o.heading.slice(cut + 3)] : [o.heading];
+    for (const s of lines) { y += 18; texts.push({ s, x: PAD, y, px: fit(s, 700, 14, 10), weight: 700, color: theme.text }); }
+  }
+  y += 8;
+  const dots = []; // { x, y, color }
+  for (const b of blocks) {
+    if (b.titles.length) {
+      let x = PAD, rowY = y + 15;
+      for (const t of b.titles) {
+        const px = fit(t.name, 600, 13, 10), w = 14 + textW(t.name, `600 ${px}px ${font}`);
+        if (x > PAD && x + w > W - PAD) { x = PAD; rowY += ROW; }
+        dots.push({ x: x + 4.5, y: rowY - 4, color: t.color });
+        texts.push({ s: t.name, x: x + 14, y: rowY, px, weight: 600, color: theme.text });
+        x += w + 16;
+      }
+      y = rowY + 7;
+    } else y += 4;
+    b.y = y;
+    y += b.h;
+  }
+  const credit = textW(o.credit, `11px ${font}`) <= W - 2 * PAD ? [o.credit] : o.credit.split(' · ');
+  for (const s of credit) { y += 15; texts.push({ s, x: W - PAD, y, px: 11, weight: 400, color: theme.muted, anchor: 'end' }); }
+  const H = y + 8;
   // Marks: x on each chart, and the top and bottom of its plot.
   for (const b of blocks) {
     const rect = b.chart.getModel().getComponent('grid')?.coordinateSystem?.getRect();
@@ -691,15 +766,12 @@ export async function exportCharts(container, format, o) {
 
   let blob;
   if (format === 'svg') {
-    const parts = [`<rect width="${W}" height="${H}" fill="${bg}"/>`,
-      `<text x="${PAD}" y="20" font-family="${esc(font)}" font-size="14" font-weight="700" fill="${theme.text}">${esc(o.heading)}</text>`];
+    const parts = [`<rect width="${W}" height="${H}" fill="${bg}"/>`];
+    for (const d of dots) parts.push(`<circle cx="${d.x}" cy="${d.y}" r="4.5" fill="${d.color}"/>`);
+    for (const t of texts) {
+      parts.push(`<text x="${t.x}" y="${t.y}"${t.anchor ? ` text-anchor="${t.anchor}"` : ''} font-family="${esc(font)}" font-size="${t.px}" font-weight="${t.weight}" fill="${t.color}">${esc(t.s)}</text>`);
+    }
     for (const b of blocks) {
-      let x = PAD;
-      for (const t of b.titles) {
-        parts.push(`<circle cx="${x + 4.5}" cy="${b.ty + 11}" r="4.5" fill="${t.color}"/>`,
-          `<text x="${x + 14}" y="${b.ty + 15}" font-family="${esc(font)}" font-size="13" font-weight="600" fill="${theme.text}">${esc(t.name)}</text>`);
-        x += 14 + t.name.length * 7.2 + 16;
-      }
       // The same chart drawn again by ECharts as SVG, off screen, at the same size.
       const div = document.createElement('div');
       div.style.cssText = `position:fixed;left:-10000px;top:0;width:${b.w}px;height:${b.h}px`;
@@ -711,7 +783,6 @@ export async function exportCharts(container, format, o) {
       parts.push(`<g transform="translate(0,${b.y})">${svg}</g>`);
       for (const m of b.marks) parts.push(`<line x1="${m.x}" x2="${m.x}" y1="${b.y + m.y0}" y2="${b.y + m.y1}" stroke="${accent}" stroke-width="2"/>`);
     }
-    parts.push(`<text x="${W - PAD}" y="${H - 7}" text-anchor="end" font-family="${esc(font)}" font-size="11" fill="${theme.muted}">${esc(o.credit)}</text>`);
     blob = new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join('')}</svg>`], { type: 'image/svg+xml' });
   } else {
     const R = 2; // twice the screen resolution
@@ -720,16 +791,7 @@ export async function exportCharts(container, format, o) {
     const ctx = cv.getContext('2d');
     ctx.scale(R, R);
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = theme.text; ctx.font = `700 14px ${font}`; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(o.heading, PAD, 20);
     for (const b of blocks) {
-      let x = PAD;
-      ctx.font = `600 13px ${font}`;
-      for (const t of b.titles) {
-        ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(x + 4.5, b.ty + 11, 4.5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = theme.text; ctx.fillText(t.name, x + 14, b.ty + 15);
-        x += 14 + ctx.measureText(t.name).width + 16;
-      }
       const img = new Image();
       img.src = b.chart.getDataURL({ type: 'png', pixelRatio: R, backgroundColor: bg });
       await img.decode();
@@ -737,8 +799,12 @@ export async function exportCharts(container, format, o) {
       ctx.strokeStyle = accent; ctx.lineWidth = 2;
       for (const m of b.marks) { ctx.beginPath(); ctx.moveTo(m.x, b.y + m.y0); ctx.lineTo(m.x, b.y + m.y1); ctx.stroke(); }
     }
-    ctx.fillStyle = theme.muted; ctx.font = `11px ${font}`; ctx.textAlign = 'right';
-    ctx.fillText(o.credit, W - PAD, H - 7);
+    for (const d of dots) { ctx.fillStyle = d.color; ctx.beginPath(); ctx.arc(d.x, d.y, 4.5, 0, Math.PI * 2); ctx.fill(); }
+    ctx.textBaseline = 'alphabetic';
+    for (const t of texts) {
+      ctx.font = `${t.weight} ${t.px}px ${font}`; ctx.fillStyle = t.color; ctx.textAlign = t.anchor === 'end' ? 'right' : 'left';
+      ctx.fillText(t.s, t.x, t.y);
+    }
     blob = await new Promise((res) => cv.toBlob(res, format === 'jpg' ? 'image/jpeg' : 'image/png', 0.92));
   }
   const a = document.createElement('a');
@@ -894,19 +960,20 @@ export function renderCharts(container, agg, keys, gran, mode, opts = {}) {
       const unitName = v.kind === 'code' ? 'WMO' : s.unit;
       // Each side only as wide as its numbers need, so the plot gets the rest.
       const fs = narrow ? 10 : 11;
-      const left = axisRoom([s.val, s.lo, s.hi, s.min, s.max], opts.yScale?.[k], v.kind, fs);
+      const left = axisRoom([s.val, s.lo, s.hi, s.min, s.max], opts.yScale?.[k], v.kind, fs, unitName);
       // No running total until its range is set: its axis is then hidden too.
       const hasCum = s.cum?.some((c) => c != null);
-      const right = hasCum ? axisRoom([s.cum, s.cumLo, s.cumHi], null, 'sum', fs) : { side: 10 };
+      const right = hasCum ? axisRoom([s.cum, s.cumLo, s.cumHi], null, 'sum', fs, `Σ ${s.unit}`) : { side: 10 };
       const yAxes = [yAxis(unitName, v.kind, theme, 'left', 0, true, left.gap)];
       applyScale(yAxes[0], v.kind, opts.yScale?.[k]);
       if (s.cum) yAxes.push({ ...yAxis(`Σ ${s.unit}`, 'sum', theme, 'right', 0, false, right.gap ?? 0), show: hasCum });
       for (const ax of yAxes) {
-        ax.axisLabel = { ...ax.axisLabel, fontSize: fs, margin: 5 };
-        ax.nameTextStyle = { ...ax.nameTextStyle, fontSize: fs };
+        ax.axisLabel = { ...ax.axisLabel, fontSize: fs, fontFamily: bodyFont(), margin: 5 };
+        ax.name = ''; // written by unitTexts instead, against the edges
       }
       const opt = baseOption(gran, theme, makeTooltip([k]), right.side, left.side, zoom);
       opt.yAxis = yAxes;
+      opt.graphic = unitTexts(unitName, hasCum ? `Σ ${s.unit}` : '', theme, opt.grid.top);
       opt.series = [...seriesFor(k, s, x, gran, color(k), { main: 0, cum: 1 }, theme, endIdx, opts.endX, agg.fc, totalIdx, stat), nowSeries(opts.nowMs, theme)];
       charts.push({ opt, cls: 'chart' + (n === keys.length - 1 ? ' last' : '') });
     });

@@ -10,10 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=126">
+  <link rel="stylesheet" href="css/app.css?v=137">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script type="module" src="js/app.js?v=126"></script>
+  <script type="module" src="js/app.js?v=137"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -48,6 +48,11 @@
     <div id="loc-info" class="loc-info muted">No location selected.</div>
     <div id="favorites" class="chips"></div>
     <div id="account" class="account"></div>
+    <!-- Credits of the place search and of the map, which only this tab uses -->
+    <p class="muted loc-credits">
+      Place names © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
+      Map © <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
+    </p>
   </section>
 
   <!-- Period -->
@@ -231,9 +236,7 @@
 
   <footer class="muted small">
     App by Greg and his friend Claude ·
-    Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0) ·
-    Place names © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
-    Map © <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
+    Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0)
   </footer>
 
   <div id="toast" class="toast" role="status" hidden></div>

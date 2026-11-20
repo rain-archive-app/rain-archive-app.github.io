@@ -1,5 +1,5 @@
 ﻿// Time-zone helpers, Open-Meteo requests and aggregation.
-import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=126';
+import { VAR_BY_KEY, baseUnit, displayUnit, convert } from './vars.js?v=137';
 
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
@@ -291,11 +291,21 @@ export async function getElevation(lat, lon, signal) {
 
 // ---------- Weather data ----------
 
+// In the archive (and the ensemble) "rain" holds all the liquid precipitation, showers included; the
+// forecast API gives showers (convective rain) apart. So for the forecast, rain = rain + showers,
+// otherwise the rain would drop at "now" whenever the forecast has showers.
+const withShowers = (keys) => (keys.includes('rain') && !keys.includes('showers') ? [...keys, 'showers'] : keys);
+function fcValue(hourly, k, i) {
+  const v = hourly[k]?.[i];
+  if (k !== 'rain' || v == null) return v ?? null;
+  return v + (hourly.showers?.[i] ?? 0);
+}
+
 function buildUrl(base, loc, keys, startDate, endDate, model) {
   const q = new URLSearchParams({
     latitude: loc.lat, longitude: loc.lon,
     start_date: startDate, end_date: endDate,
-    hourly: keys.join(','),
+    hourly: (base === FORECAST ? withShowers(keys) : keys).join(','),
     timezone: loc.tz, timeformat: 'unixtime',
   });
   if (model && model !== 'best_match') q.set('models', model);
@@ -338,7 +348,7 @@ export async function fetchHourly({ loc, keys, startSec, endSec, model, signal }
           const j = pos.get(times[i]);
           if (j == null) continue;
           for (const k of keys) {
-            if (values[k][i] == null && fc.hourly[k]?.[j] != null) { values[k][i] = fc.hourly[k][j]; filled.add(i); }
+            if (values[k][i] == null && fc.hourly[k]?.[j] != null) { values[k][i] = fcValue(fc.hourly, k, j); filled.add(i); }
           }
         }
         filledHours = filled.size;
@@ -357,7 +367,7 @@ export async function fetchHourly({ loc, keys, startSec, endSec, model, signal }
     fc.hourly.time.forEach((t, i) => {
       if (t <= from || t > endSec) return;
       times.push(t);
-      for (const k of keys) values[k].push(fc.hourly[k]?.[i] ?? null);
+      for (const k of keys) values[k].push(fcValue(fc.hourly, k, i));
     });
   }
   return { times, values, filledHours, model, tz };
